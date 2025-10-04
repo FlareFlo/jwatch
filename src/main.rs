@@ -1,6 +1,7 @@
 use color_eyre::Report;
 use color_eyre::eyre::ContextCompat;
-use std::env;
+use std::{env, thread};
+use std::sync::Arc;
 use walkdir::WalkDir;
 use crate::mediainfo::get_mediainfo;
 
@@ -13,7 +14,8 @@ pub const MBIT: usize = 2^20;
 
 fn main() -> JwatchResult<()> {
     let path = env::args().nth(1).context("missing path to folder")?;
-    for file in WalkDir::new(&path) {
+    let mut t = vec![];
+    for file in WalkDir::new(&path).contents_first(true) {
         let file = file?;
         if file.metadata()?.is_file() {
             if ["nfo", "srt"].contains(
@@ -26,15 +28,21 @@ fn main() -> JwatchResult<()> {
             ) {
                 continue;
             }
-            let mediainfo = get_mediainfo(&file.path())?;
+            let res = thread::spawn(move || {
+                let mediainfo = get_mediainfo(&file.path())?;
 
-            if !(..20.0).contains(&mediainfo.megabitrate()) {
-                let filename = file.file_name().to_string_lossy();
-                eprintln!("{filename} bitrate is bad! {:.1} mbit/s", mediainfo.megabitrate())
-            }
-
+                if !(..20.0).contains(&mediainfo.megabitrate()) {
+                    let filename = file.file_name().to_string_lossy();
+                    eprintln!("{filename} bitrate is bad! {:.1} mbit/s", mediainfo.megabitrate())
+                }
+                Ok::<(), Report>(())
+            });
+            t.push(res);
         }
     }
+    for t in t {
+        t.join().unwrap()?;
+    };
     Ok(())
 }
 
