@@ -10,6 +10,12 @@ pub struct MediaInfo {
     pub codec: Codec,
 }
 
+impl MediaInfo {
+    pub fn megabitrate(&self) -> f64 {
+        self.bitrate as f64 / 2.0_f64.powi(20)
+    }
+}
+
 #[derive(Debug)]
 pub enum Codec {
     H264,
