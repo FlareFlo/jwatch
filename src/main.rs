@@ -2,16 +2,26 @@ use color_eyre::Report;
 use color_eyre::eyre::{ContextCompat, bail, eyre};
 use std::collections::HashMap;
 use std::env;
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
+use walkdir::WalkDir;
 
 pub type JwatchResult<T> = Result<T, Report>;
 
 fn main() -> JwatchResult<()> {
-    dbg!(get_mediainfo(
-        env::args().nth(1).context("missing path to file")?
-    )?);
+    let path = env::args().nth(1).context("missing path to folder")?;
+    for file in WalkDir::new(&path) {
+        let file = file?;
+        if file.metadata()?.is_file() {
+            if file.path().extension() == Some(OsStr::new("nfo")) {
+                continue;
+            }
+            dbg!(&file.path());
+            dbg!(get_mediainfo(file.path(),)?);
+        }
+    }
     Ok(())
 }
 
@@ -37,7 +47,7 @@ fn get_mediainfo(p: impl AsRef<Path>) -> JwatchResult<MediaInfo> {
         (key.trim(), value.trim())
     }));
     Ok(MediaInfo {
-        duration: Duration::from_millis(kv.get("Duration").unwrap().parse()?),
+        duration: Duration::from_secs_f64(kv.get("Duration").unwrap().parse::<f64>()? / 1000.0),
         size: kv.get("FileSize").unwrap().parse()?,
         bitrate: kv.get("OverallBitRate").unwrap().parse()?,
         height: kv.get("Height").unwrap().parse()?,
