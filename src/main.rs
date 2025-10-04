@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, exit};
 use std::time::Duration;
 use walkdir::WalkDir;
 
@@ -15,7 +15,14 @@ fn main() -> JwatchResult<()> {
     for file in WalkDir::new(&path) {
         let file = file?;
         if file.metadata()?.is_file() {
-            if file.path().extension() == Some(OsStr::new("nfo")) {
+            if ["nfo", "srt"].contains(
+                &file
+                    .path()
+                    .extension()
+                    .context("missing file extension")?
+                    .to_str()
+                    .context("failed to convert ostr to str")?,
+            ) {
                 continue;
             }
             dbg!(&file.path());
@@ -42,17 +49,23 @@ fn get_mediainfo(p: impl AsRef<Path>) -> JwatchResult<MediaInfo> {
 
     let stdout = String::from_utf8(cmd.stdout)
         .map_err(|e| (eyre!("Invalid UTF-8 in mediainfo output: {}", e)))?;
-    let kv: HashMap<&str, &str> = HashMap::from_iter(stdout.lines().map(|line| {
-        let (key, value) = line.split_once(':').unwrap_or(("", ""));
-        (key.trim(), value.trim())
-    }));
+    let kv: HashMap<&str, HashMap<&str, &str>> =
+        HashMap::from_iter(stdout.split("\n\n").map(|section| {
+            let mut section = section.lines();
+            let header = section.next().unwrap();
+            let keys = HashMap::from_iter(section.map(|line| {
+                let (key, value) = line.split_once(':').unwrap_or(("", ""));
+                (key.trim(), value.trim())
+            }));
+            (header, keys)
+        }));
     Ok(MediaInfo {
-        duration: Duration::from_secs_f64(kv.get("Duration").unwrap().parse::<f64>()? / 1000.0),
-        size: kv.get("FileSize").unwrap().parse()?,
-        bitrate: kv.get("OverallBitRate").unwrap().parse()?,
-        height: kv.get("Height").unwrap().parse()?,
-        width: kv.get("Width").unwrap().parse()?,
-        codec: Codec::from_str(kv["CodecID"]),
+        duration: Duration::from_secs_f64(kv["General"]["Duration"].parse::<f64>()? / 1000.0),
+        size: kv["General"]["FileSize"].parse()?,
+        bitrate: kv["General"]["OverallBitRate"].parse()?,
+        height: kv["Video"]["Height"].parse()?,
+        width: kv["Video"]["Width"].parse()?,
+        codec: Codec::from_str(kv["Video"]["Format"]),
     })
 }
 
