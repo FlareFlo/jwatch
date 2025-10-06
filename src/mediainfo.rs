@@ -22,7 +22,7 @@ pub fn get_mediainfo(p: impl AsRef<Path> + std::fmt::Debug) -> JwatchResult<Medi
     }
 
     let stdout = String::from_utf8(cmd.stdout)
-        .map_err(|e| (eyre!("Invalid UTF-8 in mediainfo output: {}", e)))?;
+        .map_err(|e| eyre!("Invalid UTF-8 in mediainfo output: {}", e))?;
     let kv: HashMap<&str, HashMap<&str, &str>> =
         HashMap::from_iter(stdout.split("\n\n").map(|section| {
             let mut section = section.lines();

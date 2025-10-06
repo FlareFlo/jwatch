@@ -1,5 +1,7 @@
+use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
+#[allow(unused)]
 #[derive(Debug)]
 pub struct MediaInfo {
     pub duration: Duration,
@@ -16,6 +18,7 @@ impl MediaInfo {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum Codec {
     H264,
@@ -31,6 +34,17 @@ impl Codec {
             "hvc1" => Codec::H265,
             "av01" => Codec::AV1,
             _ => Codec::Other(code.to_owned()),
+        }
+    }
+}
+
+impl Display for Codec {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Codec::H264 => {write!(f, "H264")}
+            Codec::H265 => {write!(f, "H265")}
+            Codec::AV1 => {write!(f, "AV1")}
+            Codec::Other(other) => {write!(f, "{other}")}
         }
     }
 }
