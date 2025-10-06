@@ -24,7 +24,7 @@ fn main() -> JwatchResult<()> {
         .with_message("Indexing media...")
         .with_elapsed(start.elapsed())
         .with_style(ProgressStyle::with_template(
-            "{spinner} {elapsed} | {pos} — {wide_msg}",
+            "{spinner} T+{elapsed:<2} | {pos:<5} — {wide_msg}",
         )?.tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"))
         .with_finish(ProgressFinish::WithMessage(Cow::Borrowed("indexed media")));
 
@@ -38,7 +38,7 @@ fn main() -> JwatchResult<()> {
     let progress = ProgressBar::new(files.len() as u64)
         .with_elapsed(start.elapsed())
         .with_style(ProgressStyle::with_template(
-            "{spinner} T+{elapsed:<2} T-{eta:<2} {bar:60.cyan/red} {pos:>4}/{len:<4} {wide_msg}"
+            "{spinner} T+{elapsed:<2} T-{eta:<2} {bar:60.cyan/red} {pos:>5}/{len:<5} {wide_msg}"
         )?.tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"))
         .with_finish(ProgressFinish::WithMessage(Cow::Borrowed("processed all media")));
     progress.enable_steady_tick(Duration::from_millis(50));
