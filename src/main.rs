@@ -37,8 +37,20 @@ fn main() -> JwatchResult<()> {
 
     let files: Vec<Result<PathBuf, _>> = WalkDir::new(&path)
         .into_iter()
-        .progress_with(progress)
         .map(|e| e.map(DirEntry::into_path))
+        .filter(|path|{
+            path.as_ref().map(|p|{
+                ["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"].contains(
+                    &p
+                        .extension()
+                        .unwrap_or_else(||OsStr::new(""))
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .as_ref()
+                )
+            }).unwrap_or(false)
+        })
+        .progress_with(progress)
         .collect();
 
     let start = Instant::now();
@@ -55,25 +67,13 @@ fn main() -> JwatchResult<()> {
         let path = path?;
         let file = File::open(&path)?;
         if file.metadata()?.is_file() {
-            // Skip common metadata and auxiliary media stored alongside the media were interested in
-            if !["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"].contains(
-                &path
-                    .extension()
-                    .unwrap_or_else(||OsStr::new(""))
-                    .to_str()
-                    .context("failed to convert ostr to str")?
-                    .to_ascii_lowercase()
-                    .as_ref(),
-            ) {
-                continue;
-            }
             progress.set_message(format!(
                 "processing {}",
                 path.file_name().context("missing file name")?.display()
             ));
             let mediainfo = get_mediainfo(&path, &cachedb)?;
 
-            if !(1.0..20.0).contains(&mediainfo.megabitrate()) {
+            if !(0.2..20.0).contains(&mediainfo.megabitrate()) {
                 let filename = path
                     .file_name()
                     .context("missing file path")?
@@ -85,7 +85,7 @@ fn main() -> JwatchResult<()> {
     }
     for (filename, mediainfo) in reports {
         eprintln!(
-            "Too high bitrate: {:<4.1} mbit/s in {:<4} Path: {filename}",
+            "Bad bitrate: {:<4.1} mbit/s in {:<4} Path: {filename}",
             mediainfo.megabitrate(),
             mediainfo.codec.to_string(), // Due to formatting
         )
