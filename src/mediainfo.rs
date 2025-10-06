@@ -1,12 +1,12 @@
+use crate::JwatchResult;
+use crate::metastructs::{Codec, MediaInfo};
+use color_eyre::eyre::{ContextCompat, bail, eyre};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
-use color_eyre::eyre::{bail, eyre};
-use crate::JwatchResult;
-use crate::metastructs::{Codec, MediaInfo};
 
-pub fn get_mediainfo(p: impl AsRef<Path>) -> JwatchResult<MediaInfo> {
+pub fn get_mediainfo(p: impl AsRef<Path> + std::fmt::Debug) -> JwatchResult<MediaInfo> {
     let cmd = Command::new("mediainfo")
         .arg("--Language=raw")
         .arg("--Full")
@@ -33,12 +33,18 @@ pub fn get_mediainfo(p: impl AsRef<Path>) -> JwatchResult<MediaInfo> {
             }));
             (header, keys)
         }));
+    let getkey = |section, key| {
+        kv.get(section)
+            .with_context(|| format!("missing section {section} in {p:?}"))?
+            .get(key)
+            .with_context(|| format!("missing key {key} in {p:?}"))
+    };
     Ok(MediaInfo {
-        duration: Duration::from_secs_f64(kv["General"]["Duration"].parse::<f64>()? / 1000.0),
-        size: kv["General"]["FileSize"].parse()?,
-        bitrate: kv["General"]["OverallBitRate"].parse()?,
-        height: kv["Video"]["Height"].parse()?,
-        width: kv["Video"]["Width"].parse()?,
-        codec: Codec::from_str(kv["Video"]["Format"]),
+        duration: Duration::from_secs_f64(getkey("General", "Duration")?.parse::<f64>()? / 1000.0),
+        size: getkey("General", "FileSize")?.parse()?,
+        bitrate: getkey("General", "OverallBitRate")?.parse()?,
+        height: getkey("Video", "Height")?.parse()?,
+        width: getkey("Video", "Width")?.parse()?,
+        codec: Codec::from_str(getkey("Video", "Format")?),
     })
 }
