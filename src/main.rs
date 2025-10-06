@@ -73,7 +73,7 @@ fn main() -> JwatchResult<()> {
             ));
             let mediainfo = get_mediainfo(&path, &cachedb)?;
 
-            if !(..20.0).contains(&mediainfo.megabitrate()) {
+            if !(1.0..20.0).contains(&mediainfo.megabitrate()) {
                 let filename = path
                     .file_name()
                     .context("missing file path")?
