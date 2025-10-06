@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
+use time::OffsetDateTime;
 
 pub fn get_mediainfo(
     p: impl AsRef<Path> + std::fmt::Debug,
@@ -55,6 +56,7 @@ pub fn get_mediainfo(
         height: getkey("Video", "Height")?.parse()?,
         width: getkey("Video", "Width")?.parse()?,
         codec: Codec::from_str(getkey("Video", "Format")?),
+        last_checked: OffsetDateTime::now_local()?,
     };
     store_to_cachedb(p, &info, cachedb)?;
     Ok(info)

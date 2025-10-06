@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
+use time::OffsetDateTime;
 
 #[allow(unused)]
 #[derive(Debug)]
@@ -10,6 +11,7 @@ pub struct MediaInfo {
     pub height: usize,
     pub width: usize,
     pub codec: Codec,
+    pub last_checked: OffsetDateTime,
 }
 
 impl MediaInfo {
