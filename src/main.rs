@@ -38,17 +38,18 @@ fn main() -> JwatchResult<()> {
     let files: Vec<Result<PathBuf, _>> = WalkDir::new(&path)
         .into_iter()
         .map(|e| e.map(DirEntry::into_path))
-        .filter(|path|{
-            path.as_ref().map(|p|{
-                ["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"].contains(
-                    &p
-                        .extension()
-                        .unwrap_or_else(||OsStr::new(""))
-                        .to_string_lossy()
-                        .to_ascii_lowercase()
-                        .as_ref()
-                )
-            }).unwrap_or(false)
+        .filter(|path| {
+            path.as_ref()
+                .map(|p| {
+                    ["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"].contains(
+                        &p.extension()
+                            .unwrap_or_else(|| OsStr::new(""))
+                            .to_string_lossy()
+                            .to_ascii_lowercase()
+                            .as_ref(),
+                    )
+                })
+                .unwrap_or(false)
         })
         .progress_with(progress)
         .collect();
@@ -87,7 +88,7 @@ fn main() -> JwatchResult<()> {
         eprintln!(
             "Bad bitrate: {:<4.1} mbit/s in {:<4} Path: {filename}",
             mediainfo.megabitrate(),
-            mediainfo.codec.to_string(), // Due to formatting
+            mediainfo.codec,
         )
     }
     Ok(())

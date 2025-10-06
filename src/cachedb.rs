@@ -1,14 +1,15 @@
 use crate::JwatchResult;
 use crate::metastructs::Codec;
 use crate::metastructs::MediaInfo;
-use color_eyre::eyre::{ContextCompat};
-use rusqlite::{params, Connection, OptionalExtension};
+use color_eyre::eyre::ContextCompat;
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::time::Duration;
 use time::OffsetDateTime;
 
 pub fn init_cachedb(cachedb: &Connection) -> JwatchResult<()> {
     cachedb.execute(
+        //language=sqlite
         "\
 	CREATE TABLE IF NOT EXISTS media (
 	path TEXT PRIMARY KEY,
@@ -31,12 +32,18 @@ pub fn get_from_cachedb(
 ) -> JwatchResult<Option<MediaInfo>> {
     let res = cachedb
         .query_one(
+            //language=sqlite
             "
 		SELECT path, duration, size, bitrate, height, width, codec, last_checked
 		FROM media
 		WHERE path = ?1
 	",
-            params![p.as_ref().file_name().context("missing filename")?.to_string_lossy()],
+            params![
+                p.as_ref()
+                    .file_name()
+                    .context("missing filename")?
+                    .to_string_lossy()
+            ],
             |row| {
                 Ok(MediaInfo {
                     duration: Duration::from_millis(row.get(1)?),
@@ -59,13 +66,17 @@ pub fn store_to_cachedb(
     cachedb: &Connection,
 ) -> JwatchResult<()> {
     cachedb.execute(
+        //language=sqlite
         "\
 	INSERT OR REPLACE INTO media
 	(path, duration, size, bitrate, height, width, codec, last_checked)
 	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
 	",
         (
-            p.as_ref().file_name().context("missing filename")?.to_string_lossy(),
+            p.as_ref()
+                .file_name()
+                .context("missing filename")?
+                .to_string_lossy(),
             media_info.duration.as_millis() as i64,
             media_info.size,
             media_info.bitrate,

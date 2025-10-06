@@ -43,18 +43,11 @@ impl Codec {
 impl Display for Codec {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Codec::H264 => {
-                write!(f, "H264")
-            }
-            Codec::H265 => {
-                write!(f, "H265")
-            }
-            Codec::AV1 => {
-                write!(f, "AV1")
-            }
-            Codec::Other(other) => {
-                write!(f, "{other}")
-            }
+            Codec::H264 => "H264",
+            Codec::H265 => "H265",
+            Codec::AV1 => "AV1",
+            Codec::Other(other) => other.as_str(),
         }
+        .fmt(f)
     }
 }
