@@ -4,16 +4,24 @@ use crate::metastructs::{Codec, MediaInfo};
 use color_eyre::eyre::{ContextCompat, bail, eyre};
 use rusqlite::Connection;
 use std::collections::HashMap;
+use std::fs::Metadata;
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use time::OffsetDateTime;
 
 pub fn get_mediainfo(
     p: impl AsRef<Path> + std::fmt::Debug,
+    metadata: Metadata,
     cachedb: &Connection,
 ) -> JwatchResult<MediaInfo> {
-    if let Some(info) = get_from_cachedb(&p, cachedb)? {
+    if let Some(info) = get_from_cachedb(&p, cachedb)?
+        && info.mtime
+            == metadata
+                .modified()?
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_secs() as _
+    {
         return Ok(info);
     }
 
@@ -57,6 +65,10 @@ pub fn get_mediainfo(
         width: getkey("Video", "Width")?.parse()?,
         codec: Codec::from_str(getkey("Video", "Format")?),
         last_checked: OffsetDateTime::now_local()?,
+        mtime: metadata
+            .modified()?
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs() as i64,
     };
     store_to_cachedb(p, &info, cachedb)?;
     Ok(info)

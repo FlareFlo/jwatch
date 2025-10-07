@@ -72,7 +72,7 @@ fn main() -> JwatchResult<()> {
                 "processing {}",
                 path.file_name().context("missing file name")?.display()
             ));
-            let mediainfo = get_mediainfo(&path, &cachedb)?;
+            let mediainfo = get_mediainfo(&path, file.metadata()?, &cachedb)?;
 
             if !(0.2..20.0).contains(&mediainfo.megabitrate()) {
                 let filename = path

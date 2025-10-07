@@ -12,6 +12,7 @@ pub struct MediaInfo {
     pub width: usize,
     pub codec: Codec,
     pub last_checked: OffsetDateTime,
+    pub mtime: i64, // Last modification of file in seconds
 }
 
 impl MediaInfo {
