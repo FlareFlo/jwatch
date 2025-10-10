@@ -1,7 +1,7 @@
 use crate::cachedb::init_cachedb;
 use crate::mediainfo::get_mediainfo;
 use color_eyre::{Report, Section};
-use color_eyre::eyre::ContextCompat;
+use color_eyre::eyre::{Context, ContextCompat};
 use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use rusqlite::Connection;
 use std::borrow::Cow;
@@ -73,7 +73,7 @@ fn main() -> JwatchResult<()> {
                 "processing {}",
                 path.file_name().context("missing file name")?.display()
             ));
-            let mediainfo = get_mediainfo(&path, file.metadata()?, &cachedb)?;
+            let mediainfo = get_mediainfo(&path, file.metadata()?, &cachedb).with_note(||format!("Occurred in: {}", path.display()))?;
 
             if !(0.2..20.0).contains(&mediainfo.megabitrate()) {
                 let filename = path
@@ -92,5 +92,6 @@ fn main() -> JwatchResult<()> {
             mediainfo.codec,
         )
     }
+    cachedb.close().map_err(|e|e.1).context("failed to close cachedb connection")?;
     Ok(())
 }

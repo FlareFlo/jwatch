@@ -20,7 +20,9 @@ pub fn init_cachedb(cachedb: &Connection) -> JwatchResult<()> {
 	width INTEGER NOT NULL,
 	codec TEXT NOT NULL,
     last_checked INTEGER NOT NULL,
-    mtime INTEGER NOT NULL
+    mtime INTEGER NOT NULL,
+    languages TEXT NOT NULL,
+    whitelisted BOOLEAN NOT NULL
 	)",
         (),
     )?;
@@ -35,7 +37,7 @@ pub fn get_from_cachedb(
         .query_one(
             //language=sqlite
             "
-		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime
+		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, whitelisted
 		FROM media
 		WHERE path = ?1
 	",
@@ -55,6 +57,8 @@ pub fn get_from_cachedb(
                     codec: Codec::from_str(row.get_ref(6)?.as_str()?),
                     last_checked: OffsetDateTime::from_unix_timestamp(row.get(7)?).unwrap(),
                     mtime: row.get(8)?,
+                    languages: row.get::<_, String>(9)?.split(' ').map(str::to_owned).collect(),
+                    whitelisted: row.get(10)?,
                 })
             },
         )
@@ -71,8 +75,8 @@ pub fn store_to_cachedb(
         //language=sqlite
         "\
 	INSERT OR REPLACE INTO media
-	(path, duration, size, bitrate, height, width, codec, last_checked, mtime)
-	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, whitelisted)
+	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 	",
         (
             p.as_ref()
@@ -87,6 +91,8 @@ pub fn store_to_cachedb(
             media_info.codec.to_string(),
             media_info.last_checked.unix_timestamp(),
             media_info.mtime,
+            media_info.languages.join(" "),
+            media_info.whitelisted,
         ),
     )?;
     Ok(())

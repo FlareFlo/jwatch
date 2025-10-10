@@ -13,6 +13,8 @@ pub struct MediaInfo {
     pub codec: Codec,
     pub last_checked: OffsetDateTime,
     pub mtime: i64, // Last modification of file in seconds
+    pub languages: Vec<String>,
+    pub whitelisted: bool,
 }
 
 impl MediaInfo {

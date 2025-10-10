@@ -8,6 +8,7 @@ use std::fs::Metadata;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
+use color_eyre::Help;
 use time::OffsetDateTime;
 
 pub fn get_mediainfo(
@@ -15,12 +16,12 @@ pub fn get_mediainfo(
     metadata: Metadata,
     cachedb: &Connection,
 ) -> JwatchResult<MediaInfo> {
-    if let Some(info) = get_from_cachedb(&p, cachedb)?
+    if let Some(info) = get_from_cachedb(&p, cachedb).note("Database needs migration?")?
         && info.mtime
             == metadata
                 .modified()?
                 .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_secs() as _
+                .as_secs() as _ && false
     {
         return Ok(info);
     }
@@ -41,8 +42,8 @@ pub fn get_mediainfo(
 
     let stdout = String::from_utf8(cmd.stdout)
         .map_err(|e| eyre!("Invalid UTF-8 in mediainfo output: {}", e))?;
-    let kv: HashMap<&str, HashMap<&str, &str>> =
-        HashMap::from_iter(stdout.split("\n\n").map(|section| {
+    let kv: Vec<(&str, HashMap<&str, &str>)> =
+        Vec::from_iter(stdout.split("\n\n").map(|section| {
             let mut section = section.lines();
             let header = section.next().unwrap();
             let keys = HashMap::from_iter(section.map(|line| {
@@ -52,11 +53,12 @@ pub fn get_mediainfo(
             (header, keys)
         }));
     let getkey = |section, key| {
-        kv.get(section)
-            .with_context(|| format!("missing section {section} in {p:?}"))?
+        kv.iter().find(|(k, _)|*k == section)
+            .with_context(|| format!("missing section {section} in {p:?}"))?.1
             .get(key)
             .with_context(|| format!("missing key {key} in {p:?}"))
     };
+
     let info = MediaInfo {
         duration: Duration::from_secs_f64(getkey("General", "Duration")?.parse::<f64>()? / 1000.0),
         size: getkey("General", "FileSize")?.parse()?,
@@ -69,6 +71,8 @@ pub fn get_mediainfo(
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs() as i64,
+        languages: kv.iter().filter(|(k, _)|k.contains("Audio")).map(|(_, elem)|elem.get("Language").unwrap_or(&"").to_string()).collect::<Vec<_>>(),
+        whitelisted: false,
     };
     store_to_cachedb(p, &info, cachedb)?;
     Ok(info)
