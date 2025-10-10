@@ -1,6 +1,6 @@
 use crate::cachedb::init_cachedb;
 use crate::mediainfo::get_mediainfo;
-use color_eyre::Report;
+use color_eyre::{Report, Section};
 use color_eyre::eyre::ContextCompat;
 use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use rusqlite::Connection;
@@ -21,6 +21,7 @@ pub type JwatchResult<T> = Result<T, Report>;
 pub const MBIT: usize = 2 ^ 20;
 
 fn main() -> JwatchResult<()> {
+    color_eyre::install()?;
     let path = env::args().nth(1).context("missing path to folder")?;
     let cachedb = Connection::open(path.clone() + "/jwatch.sqlite")?;
     init_cachedb(&cachedb)?;
