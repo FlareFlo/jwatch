@@ -74,23 +74,29 @@ fn main() -> JwatchResult<()> {
                 path.file_name().context("missing file name")?.display()
             ));
             let mediainfo = get_mediainfo(&path, file.metadata()?, &cachedb).with_note(||format!("Occurred in: {}", path.display()))?;
+            let filename = path
+                .file_name()
+                .context("missing file path")?
+                .to_string_lossy()
+                .to_string();
 
             if !(0.2..20.0).contains(&mediainfo.megabitrate()) {
-                let filename = path
-                    .file_name()
-                    .context("missing file path")?
-                    .to_string_lossy()
-                    .to_string();
-                reports.push((filename, mediainfo));
+                let reason =  format!(
+                    "Undesired bitrate: {:<4.1} mbit/s with codec {:<4}",
+                    mediainfo.megabitrate(),
+                    mediainfo.codec,
+                );
+                reports.push((reason, filename.clone(), mediainfo.clone()));
+            }
+            let desired_langs = &["en", "de"];
+            let undesired = mediainfo.languages.clone().into_iter().filter(|l|!desired_langs.contains(&l.as_str())).collect::<Vec<_>>();
+            if undesired.len() > 0 {
+                reports.push((format!("Undesired languages {}", undesired.join(" ")), filename.clone(), mediainfo.clone()));
             }
         }
     }
-    for (filename, mediainfo) in reports {
-        eprintln!(
-            "Bad bitrate: {:<4.1} mbit/s in {:<4} Path: {filename}",
-            mediainfo.megabitrate(),
-            mediainfo.codec,
-        )
+    for (reason, filename, _mediainfo) in reports {
+       eprintln!("{} found in: {filename}", reason);
     }
     cachedb.close().map_err(|e|e.1).context("failed to close cachedb connection")?;
     Ok(())

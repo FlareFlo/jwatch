@@ -3,7 +3,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MediaInfo {
     pub duration: Duration,
     pub size: usize,
@@ -24,7 +24,7 @@ impl MediaInfo {
 }
 
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Codec {
     H264,
     H265,

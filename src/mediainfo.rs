@@ -21,7 +21,7 @@ pub fn get_mediainfo(
             == metadata
                 .modified()?
                 .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_secs() as _ && false
+                .as_secs() as _
     {
         return Ok(info);
     }
@@ -71,7 +71,7 @@ pub fn get_mediainfo(
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs() as i64,
-        languages: kv.iter().filter(|(k, _)|k.contains("Audio")).map(|(_, elem)|elem.get("Language").unwrap_or(&"").to_string()).collect::<Vec<_>>(),
+        languages: kv.iter().filter(|(k, _)|k.contains("Audio")).filter_map(|(_, elem)|elem.get("Language").map(|s|s.to_string())).collect::<Vec<_>>(),
         whitelisted: false,
     };
     store_to_cachedb(p, &info, cachedb)?;
