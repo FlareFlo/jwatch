@@ -1,3 +1,4 @@
 /target
 .idea
 identifier.sqlite
+/jwatch.sqlite
