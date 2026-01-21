@@ -18,7 +18,24 @@ mod metastructs;
 
 pub type JwatchResult<T> = Result<T, Report>;
 
-pub const MBIT: usize = 2 ^ 20;
+const VIDEO_EXTENSIONS: &[&str] = &[
+    "mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v",
+];
+const ACCEPTED_BITRATE_RANGE: std::ops::Range<f64> = 0.2..20.0;
+const ACCEPTED_LANGS: &[&str] = &[
+    "en", "de",
+];
+
+fn is_video_file(entry: &DirEntry) -> bool {
+    entry.path()
+        .extension()
+        .map(OsStr::to_string_lossy)
+        .map(|ext| {
+            let ext = ext.to_ascii_lowercase();
+            VIDEO_EXTENSIONS.contains(&ext.as_str())
+        })
+        .unwrap_or(false)
+}
 
 fn main() -> JwatchResult<()> {
     color_eyre::install()?;
@@ -38,20 +55,8 @@ fn main() -> JwatchResult<()> {
 
     let files: Vec<Result<PathBuf, _>> = WalkDir::new(&path)
         .into_iter()
+        .filter(|e| e.as_ref().map(is_video_file).unwrap_or(false))
         .map(|e| e.map(DirEntry::into_path))
-        .filter(|path| {
-            path.as_ref()
-                .map(|p| {
-                    ["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"].contains(
-                        &p.extension()
-                            .unwrap_or_else(|| OsStr::new(""))
-                            .to_string_lossy()
-                            .to_ascii_lowercase()
-                            .as_ref(),
-                    )
-                })
-                .unwrap_or(false)
-        })
         .progress_with(progress)
         .collect();
 
@@ -80,7 +85,7 @@ fn main() -> JwatchResult<()> {
                 .to_string_lossy()
                 .to_string();
 
-            if !(0.2..20.0).contains(&mediainfo.megabitrate()) {
+            if !ACCEPTED_BITRATE_RANGE.contains(&mediainfo.megabitrate()) {
                 let reason =  format!(
                     "Undesired bitrate: {:<4.1} mbit/s with codec {:<4}",
                     mediainfo.megabitrate(),
@@ -88,16 +93,20 @@ fn main() -> JwatchResult<()> {
                 );
                 reports.push((reason, filename.clone(), mediainfo.clone()));
             }
-            let desired_langs = &["en", "de"];
+
+            let desired_langs = ACCEPTED_LANGS;
             let undesired = mediainfo.languages.clone().into_iter().filter(|l|!desired_langs.contains(&l.as_str())).collect::<Vec<_>>();
-            if undesired.len() > 0 {
+            if !undesired.is_empty() {
                 reports.push((format!("Undesired languages {}", undesired.join(" ")), filename.clone(), mediainfo.clone()));
             }
         }
     }
+
     for (reason, filename, _mediainfo) in reports {
-       eprintln!("{} found in: {filename}", reason);
+       println!("{} found in: {filename}", reason);
     }
+
     cachedb.close().map_err(|e|e.1).context("failed to close cachedb connection")?;
+
     Ok(())
 }
