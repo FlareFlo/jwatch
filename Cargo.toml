@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+argh = "0.1.13"
 color-eyre = "0.6.5"
 indicatif = "0.18.0"
 rusqlite = "0.37.0"

@@ -11,10 +11,12 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use walkdir::{DirEntry, WalkDir};
+use crate::argparse::Args;
 
 mod cachedb;
 mod mediainfo;
 mod metastructs;
+mod argparse;
 
 pub type JwatchResult<T> = Result<T, Report>;
 
@@ -39,7 +41,8 @@ fn is_video_file(entry: &DirEntry) -> bool {
 
 fn main() -> JwatchResult<()> {
     color_eyre::install()?;
-    let path = env::args().nth(1).context("missing path to folder")?;
+    let args: Args = argh::from_env();
+    let path = args.path;
     let cachedb = Connection::open(path.clone() + "/jwatch.sqlite")?;
     init_cachedb(&cachedb)?;
 
