@@ -13,7 +13,8 @@ const DB_APP_ID: i32 = i32::from_le_bytes([b'j', b'w', b'a', b't']);
 
 pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<()> {
     let db_app_id: i32 /* Type inference somehow thinks this should be !*/ = cachedb.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if db_app_id != DB_APP_ID {
+    let schema_version: i32 = cachedb.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+    if db_app_id != DB_APP_ID && schema_version != 0 { // Schema 0 means the DB is uninitialized
         panic!("Database app ID missmatch, refusing to touch it\nIf youre confident it is the correct one, you can manually delete it at {path}");
     }
 
