@@ -41,7 +41,7 @@ fn main() -> JwatchResult<()> {
     let args: Args = argh::from_env();
     let path = args.path;
     let mut cachedb = Connection::open(path.clone() + "/jwatch.sqlite")?;
-    init_cachedb(&mut cachedb, path.clone() + "/jwatch.sqlite")?; // TODO: DEDUP
+    init_cachedb(&mut cachedb, path.clone() + "jwatch.sqlite")?; // TODO: DEDUP
 
     let start = Instant::now();
     let progress = ProgressBar::new_spinner()
