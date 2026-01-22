@@ -9,6 +9,8 @@ use std::path::Path;
 use std::time::Duration;
 use time::OffsetDateTime;
 
+const DB_APP_ID: i32 = i32::from_le_bytes([b'j', b'w', b'a', b't']);
+
 pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<()> {
     let dbschema = //language=sqlite
         "\
