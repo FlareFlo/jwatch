@@ -32,11 +32,10 @@ fn is_video_file(entry: &DirEntry) -> bool {
     entry.path()
         .extension()
         .map(OsStr::to_string_lossy)
-        .map(|ext| {
+        .is_some_and(|ext| {
             let ext = ext.to_ascii_lowercase();
             VIDEO_EXTENSIONS.contains(&ext.as_str())
         })
-        .unwrap_or(false)
 }
 
 fn main() -> JwatchResult<()> {
@@ -106,7 +105,7 @@ fn main() -> JwatchResult<()> {
     }
 
     for (reason, filename, _mediainfo) in reports {
-       println!("{} found in: {filename}", reason);
+       println!("{reason} found in: {filename}");
     }
 
     cachedb.close().map_err(|e|e.1).context("failed to close cachedb connection")?;

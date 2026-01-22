@@ -6,10 +6,10 @@ use time::OffsetDateTime;
 #[derive(Debug, Clone)]
 pub struct MediaInfo {
     pub duration: Duration,
-    pub size: usize,
-    pub bitrate: usize,
-    pub height: usize,
-    pub width: usize,
+    pub size: u64,
+    pub bitrate: u64,
+    pub height: u64,
+    pub width: u64,
     pub codec: Codec,
     pub last_checked: OffsetDateTime,
     pub mtime: i64, // Last modification of file in seconds
