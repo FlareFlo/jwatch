@@ -1,6 +1,7 @@
 use crate::JwatchResult;
 use crate::cachedb::{get_from_cachedb, store_to_cachedb};
 use crate::metastructs::{Codec, MediaInfo};
+use color_eyre::Help;
 use color_eyre::eyre::{ContextCompat, bail, eyre};
 use rusqlite::Connection;
 use std::collections::HashMap;
@@ -8,7 +9,6 @@ use std::fs::Metadata;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
-use color_eyre::Help;
 use time::OffsetDateTime;
 
 pub fn get_mediainfo(
@@ -53,8 +53,10 @@ pub fn get_mediainfo(
             (header, keys)
         }));
     let getkey = |section, key| {
-        kv.iter().find(|(k, _)|*k == section)
-            .with_context(|| format!("missing section {section} in {p:?}"))?.1
+        kv.iter()
+            .find(|(k, _)| *k == section)
+            .with_context(|| format!("missing section {section} in {p:?}"))?
+            .1
             .get(key)
             .with_context(|| format!("missing key {key} in {p:?}"))
     };
@@ -71,7 +73,11 @@ pub fn get_mediainfo(
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs() as i64,
-        languages: kv.iter().filter(|(k, _)|k.contains("Audio")).filter_map(|(_, elem)|elem.get("Language").map(|s|s.to_string())).collect::<Vec<_>>(),
+        languages: kv
+            .iter()
+            .filter(|(k, _)| k.contains("Audio"))
+            .filter_map(|(_, elem)| elem.get("Language").map(|s| s.to_string()))
+            .collect::<Vec<_>>(),
         whitelisted: false,
     };
     store_to_cachedb(p, &info, cachedb)?;

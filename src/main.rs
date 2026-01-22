@@ -1,7 +1,8 @@
+use crate::argparse::Args;
 use crate::cachedb::init_cachedb;
 use crate::mediainfo::get_mediainfo;
-use color_eyre::{Report, Section};
 use color_eyre::eyre::{Context, ContextCompat};
+use color_eyre::{Report, Section};
 use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use rusqlite::Connection;
 use std::borrow::Cow;
@@ -11,25 +12,21 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use walkdir::{DirEntry, WalkDir};
-use crate::argparse::Args;
 
+mod argparse;
 mod cachedb;
 mod mediainfo;
 mod metastructs;
-mod argparse;
 
 pub type JwatchResult<T> = Result<T, Report>;
 
-const VIDEO_EXTENSIONS: &[&str] = &[
-    "mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v",
-];
+const VIDEO_EXTENSIONS: &[&str] = &["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"];
 const ACCEPTED_BITRATE_RANGE: std::ops::Range<f64> = 0.2..20.0;
-const ACCEPTED_LANGS: &[&str] = &[
-    "en", "de",
-];
+const ACCEPTED_LANGS: &[&str] = &["en", "de"];
 
 fn is_video_file(entry: &DirEntry) -> bool {
-    entry.path()
+    entry
+        .path()
         .extension()
         .map(OsStr::to_string_lossy)
         .map(|ext| {
@@ -81,7 +78,8 @@ fn main() -> JwatchResult<()> {
                 "processing {}",
                 path.file_name().context("missing file name")?.display()
             ));
-            let mediainfo = get_mediainfo(&path, file.metadata()?, &cachedb).with_note(||format!("Occurred in: {}", path.display()))?;
+            let mediainfo = get_mediainfo(&path, file.metadata()?, &cachedb)
+                .with_note(|| format!("Occurred in: {}", path.display()))?;
             let filename = path
                 .file_name()
                 .context("missing file path")?
@@ -89,7 +87,7 @@ fn main() -> JwatchResult<()> {
                 .to_string();
 
             if !ACCEPTED_BITRATE_RANGE.contains(&mediainfo.megabitrate()) {
-                let reason =  format!(
+                let reason = format!(
                     "Undesired bitrate: {:<4.1} mbit/s with codec {:<4}",
                     mediainfo.megabitrate(),
                     mediainfo.codec,
@@ -98,18 +96,30 @@ fn main() -> JwatchResult<()> {
             }
 
             let desired_langs = ACCEPTED_LANGS;
-            let undesired = mediainfo.languages.clone().into_iter().filter(|l|!desired_langs.contains(&l.as_str())).collect::<Vec<_>>();
+            let undesired = mediainfo
+                .languages
+                .clone()
+                .into_iter()
+                .filter(|l| !desired_langs.contains(&l.as_str()))
+                .collect::<Vec<_>>();
             if !undesired.is_empty() {
-                reports.push((format!("Undesired languages {}", undesired.join(" ")), filename.clone(), mediainfo.clone()));
+                reports.push((
+                    format!("Undesired languages {}", undesired.join(" ")),
+                    filename.clone(),
+                    mediainfo.clone(),
+                ));
             }
         }
     }
 
     for (reason, filename, _mediainfo) in reports {
-       println!("{} found in: {filename}", reason);
+        println!("{} found in: {filename}", reason);
     }
 
-    cachedb.close().map_err(|e|e.1).context("failed to close cachedb connection")?;
+    cachedb
+        .close()
+        .map_err(|e| e.1)
+        .context("failed to close cachedb connection")?;
 
     Ok(())
 }

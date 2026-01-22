@@ -1,10 +1,10 @@
-use std::fs;
-use std::hash::{DefaultHasher, Hasher};
 use crate::JwatchResult;
 use crate::metastructs::Codec;
 use crate::metastructs::MediaInfo;
 use color_eyre::eyre::{Context, ContextCompat};
 use rusqlite::{Connection, OptionalExtension, params};
+use std::fs;
+use std::hash::{DefaultHasher, Hasher};
 use std::path::Path;
 use std::time::Duration;
 use time::OffsetDateTime;
@@ -34,12 +34,11 @@ pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<
         eprintln!("DB schema out of date, migrating...");
         fs::remove_file(&path)?;
         *cachedb = Connection::open(&path)?;
+        cachedb.pragma_update(None, "application_id", &hash)?;
     }
     cachedb.pragma_update(None, "user_version", &hash)?;
 
-    cachedb.execute(
-        dbschema, (),
-    )?;
+    cachedb.execute(dbschema, ())?;
     Ok(())
 }
 
