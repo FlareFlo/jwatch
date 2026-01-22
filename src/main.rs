@@ -43,8 +43,8 @@ fn main() -> JwatchResult<()> {
     color_eyre::install()?;
     let args: Args = argh::from_env();
     let path = args.path;
-    let cachedb = Connection::open(path.clone() + "/jwatch.sqlite")?;
-    init_cachedb(&cachedb)?;
+    let mut cachedb = Connection::open(path.clone() + "/jwatch.sqlite")?;
+    init_cachedb(&mut cachedb, path.clone() + "/jwatch.sqlite")?; // TODO: DEDUP
 
     let start = Instant::now();
     let progress = ProgressBar::new_spinner()

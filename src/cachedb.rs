@@ -1,15 +1,16 @@
+use std::fs;
+use std::hash::{DefaultHasher, Hasher};
 use crate::JwatchResult;
 use crate::metastructs::Codec;
 use crate::metastructs::MediaInfo;
-use color_eyre::eyre::ContextCompat;
+use color_eyre::eyre::{Context, ContextCompat};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-pub fn init_cachedb(cachedb: &Connection) -> JwatchResult<()> {
-    cachedb.execute(
-        //language=sqlite
+pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<()> {
+    let dbschema = //language=sqlite
         "\
 	CREATE TABLE IF NOT EXISTS media (
 	path TEXT PRIMARY KEY,
@@ -23,8 +24,20 @@ pub fn init_cachedb(cachedb: &Connection) -> JwatchResult<()> {
     mtime INTEGER NOT NULL,
     languages TEXT NOT NULL,
     whitelisted BOOLEAN NOT NULL
-	)",
-        (),
+	)";
+    let mut h = DefaultHasher::new();
+    h.write(dbschema.as_bytes());
+    let hash = h.finish() as i32; // Yes this truncates a bit, doesnt matter though.
+    let dbhash = cachedb.pragma_query_value(None, "user_version", |row| row.get(0))?;
+
+    if hash != dbhash {
+        eprintln!("DB schema out of date, migrating...");
+        fs::remove_file(&path)?;
+        *cachedb = Connection::open(&path)?;
+    }
+
+    cachedb.execute(
+        dbschema, (),
     )?;
     Ok(())
 }
