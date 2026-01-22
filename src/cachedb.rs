@@ -12,6 +12,11 @@ use time::OffsetDateTime;
 const DB_APP_ID: i32 = i32::from_le_bytes([b'j', b'w', b'a', b't']);
 
 pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<()> {
+    let db_app_id = cachedb.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    if db_app_id != DB_APP_ID {
+        panic!("Database app ID missmatch, refusing to touch it\nIf youre confident it is the correct one, you can manually delete it at {path}");
+    }
+
     let dbschema = //language=sqlite
         "\
 	CREATE TABLE IF NOT EXISTS media (
@@ -36,7 +41,7 @@ pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<
         eprintln!("DB schema out of date, migrating...");
         fs::remove_file(&path)?;
         *cachedb = Connection::open(&path)?;
-        cachedb.pragma_update(None, "application_id", &hash)?;
+        cachedb.pragma_update(None, "application_id", &DB_APP_ID)?;
     }
     cachedb.pragma_update(None, "user_version", &hash)?;
 
