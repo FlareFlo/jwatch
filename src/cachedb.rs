@@ -35,6 +35,7 @@ pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<
         fs::remove_file(&path)?;
         *cachedb = Connection::open(&path)?;
     }
+    cachedb.pragma_update(None, "user_version", &hash)?;
 
     cachedb.execute(
         dbschema, (),
