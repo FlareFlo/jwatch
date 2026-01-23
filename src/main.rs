@@ -1,10 +1,9 @@
 use crate::argparse::Args;
-use crate::cachedb::init_cachedb;
+use crate::cachedb::CacheDB;
 use crate::mediainfo::get_mediainfo;
-use color_eyre::eyre::{Context, ContextCompat};
+use color_eyre::eyre::{ContextCompat};
 use color_eyre::{Report, Section};
 use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
-use rusqlite::Connection;
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -39,8 +38,7 @@ fn main() -> JwatchResult<()> {
     color_eyre::install()?;
     let args: Args = argh::from_env();
     let path = args.path;
-    let mut cachedb = Connection::open(path.clone() + "/jwatch.sqlite")?;
-    init_cachedb(&mut cachedb, path.clone() + "jwatch.sqlite")?; // TODO: DEDUP
+    let cachedb = CacheDB::init_cachedb(&path)?; // TODO: DEDUP
 
     let start = Instant::now();
     let progress = ProgressBar::new_spinner()
@@ -115,10 +113,7 @@ fn main() -> JwatchResult<()> {
         println!("{} found in: {filename}", reason);
     }
 
-    cachedb
-        .close()
-        .map_err(|e| e.1)
-        .context("failed to close cachedb connection")?;
+    cachedb.cleanup()?;
 
     Ok(())
 }

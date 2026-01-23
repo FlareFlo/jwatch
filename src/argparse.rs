@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 #[derive(argh::FromArgs, Debug)]
 /// WIP
 pub struct Args {

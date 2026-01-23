@@ -1,9 +1,8 @@
 use crate::JwatchResult;
-use crate::cachedb::{get_from_cachedb, store_to_cachedb};
+use crate::cachedb::CacheDB;
 use crate::metastructs::{Codec, MediaInfo};
 use color_eyre::Help;
 use color_eyre::eyre::{ContextCompat, bail, eyre};
-use rusqlite::Connection;
 use serde::Deserialize;
 use std::fs::Metadata;
 use std::path::Path;
@@ -21,7 +20,6 @@ struct JsonMedia {
     #[serde(rename = "track")]
     tracks: Vec<Track>,
 }
-
 
 #[derive(Deserialize)]
 struct Track {
@@ -47,9 +45,11 @@ struct Track {
 pub fn get_mediainfo(
     p: impl AsRef<Path> + std::fmt::Debug,
     metadata: Metadata,
-    cachedb: &Connection,
+    cachedb: &CacheDB,
 ) -> JwatchResult<MediaInfo> {
-    if let Some(info) = get_from_cachedb(&p, cachedb).note("Database needs migration?")?
+    if let Some(info) = cachedb
+        .get_from_cachedb(&p)
+        .note("Database needs migration?")?
         && info.mtime
             == metadata
                 .modified()?
@@ -58,7 +58,6 @@ pub fn get_mediainfo(
     {
         return Ok(info);
     }
-
 
     let cmd = Command::new("mediainfo")
         .arg("--Language=raw")
@@ -82,38 +81,47 @@ pub fn get_mediainfo(
         .map_err(|e| eyre!("Failed to parse mediainfo JSON output: {}", e))?;
     let tracks = json.media.tracks;
 
-    let general_track = tracks.iter().find(|t| t.type_ == "General")
+    let general_track = tracks
+        .iter()
+        .find(|t| t.type_ == "General")
         .with_context(|| format!("missing General track in mediainfo output for {p:?}"))?;
 
-    let video_track = tracks.iter().find(|t| t.type_ == "Video")
+    let video_track = tracks
+        .iter()
+        .find(|t| t.type_ == "Video")
         .with_context(|| format!("missing Video track in mediainfo output for {p:?}"))?;
 
-    
     let info = MediaInfo {
         duration: Duration::from_secs_f64(
-            general_track.duration
+            general_track
+                .duration
                 .as_ref()
                 .with_context(|| format!("missing Duration in General track for {p:?}"))?
                 .parse::<f64>()?,
         ),
-        size: general_track.file_size
+        size: general_track
+            .file_size
             .as_ref()
             .with_context(|| format!("missing FileSize in General track for {p:?}"))?
             .parse()?,
-        bitrate: general_track.overall_bit_rate
+        bitrate: general_track
+            .overall_bit_rate
             .as_ref()
             .with_context(|| format!("missing OverallBitRate in General track for {p:?}"))?
             .parse()?,
-        height: video_track.height
+        height: video_track
+            .height
             .as_ref()
             .with_context(|| format!("missing Height in Video track for {p:?}"))?
             .parse()?,
-        width: video_track.width
+        width: video_track
+            .width
             .as_ref()
             .with_context(|| format!("missing Width in Video track for {p:?}"))?
             .parse()?,
         codec: Codec::from_str(
-            video_track.format
+            video_track
+                .format
                 .as_ref()
                 .with_context(|| format!("missing Format in Video track for {p:?}"))?,
         ),
@@ -122,11 +130,15 @@ pub fn get_mediainfo(
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs() as i64,
-        languages: tracks.iter().filter(|t| t.type_ == "Audio").filter_map(|t| t.language.clone()).collect::<Vec<_>>(),
+        languages: tracks
+            .iter()
+            .filter(|t| t.type_ == "Audio")
+            .filter_map(|t| t.language.clone())
+            .collect::<Vec<_>>(),
         whitelisted: false,
     };
 
-    store_to_cachedb(p, &info, cachedb)?;
+    cachedb.store_to_cachedb(p, &info)?;
 
     Ok(info)
 }
