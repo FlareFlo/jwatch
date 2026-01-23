@@ -1,6 +1,7 @@
 use crate::JwatchResult;
 use crate::cachedb::{get_from_cachedb, store_to_cachedb};
 use crate::metastructs::{Codec, MediaInfo};
+use color_eyre::Help;
 use color_eyre::eyre::{ContextCompat, bail, eyre};
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -8,7 +9,6 @@ use std::fs::Metadata;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
-use color_eyre::Help;
 use time::OffsetDateTime;
 
 #[derive(Deserialize)]

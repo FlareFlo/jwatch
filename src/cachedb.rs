@@ -1,15 +1,24 @@
 use crate::JwatchResult;
 use crate::metastructs::Codec;
 use crate::metastructs::MediaInfo;
-use color_eyre::eyre::ContextCompat;
+use color_eyre::eyre::{Context, ContextCompat};
 use rusqlite::{Connection, OptionalExtension, params};
+use std::fs;
+use std::hash::{DefaultHasher, Hasher};
 use std::path::Path;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-pub fn init_cachedb(cachedb: &Connection) -> JwatchResult<()> {
-    cachedb.execute(
-        //language=sqlite
+const DB_APP_ID: i32 = i32::from_le_bytes([b'j', b'w', b'a', b't']);
+
+pub fn init_cachedb(mut cachedb: &mut Connection, path: String) -> JwatchResult<()> {
+    let db_app_id: i32 /* Type inference somehow thinks this should be !*/ = cachedb.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    let schema_version: i32 = cachedb.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+    if db_app_id != DB_APP_ID && schema_version != 0 { // Schema 0 means the DB is uninitialized
+        panic!("Database app ID missmatch, refusing to touch it\nIf youre confident it is the correct one, you can manually delete it at {path}");
+    }
+
+    let dbschema = //language=sqlite
         "\
 	CREATE TABLE IF NOT EXISTS media (
 	path TEXT PRIMARY KEY,
@@ -23,9 +32,21 @@ pub fn init_cachedb(cachedb: &Connection) -> JwatchResult<()> {
     mtime INTEGER NOT NULL,
     languages TEXT NOT NULL,
     whitelisted BOOLEAN NOT NULL
-	)",
-        (),
-    )?;
+	)";
+    let mut h = DefaultHasher::new();
+    h.write(dbschema.as_bytes());
+    let hash = h.finish() as i32; // Yes this truncates a bit, doesnt matter though.
+    let dbhash = cachedb.pragma_query_value(None, "user_version", |row| row.get(0))?;
+
+    if hash != dbhash {
+        eprintln!("DB schema out of date, migrating...");
+        fs::remove_file(&path)?;
+        *cachedb = Connection::open(&path)?;
+        cachedb.pragma_update(None, "application_id", &DB_APP_ID)?;
+    }
+    cachedb.pragma_update(None, "user_version", &hash)?;
+
+    cachedb.execute(dbschema, ())?;
     Ok(())
 }
 
