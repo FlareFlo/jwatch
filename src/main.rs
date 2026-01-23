@@ -6,7 +6,6 @@ use color_eyre::{Report, Section};
 use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use rusqlite::Connection;
 use std::borrow::Cow;
-use std::env;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::path::PathBuf;
