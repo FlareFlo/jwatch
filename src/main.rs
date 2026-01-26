@@ -38,7 +38,7 @@ fn main() -> JwatchResult<()> {
     color_eyre::install()?;
     let args: Args = argh::from_env();
     let path = args.path;
-    let cachedb = CacheDB::init_cachedb(&path)?; // TODO: DEDUP
+    let cachedb = CacheDB::init_cachedb(args.db_path.as_deref().unwrap_or(&path))?; // TODO: DEDUP
 
     let start = Instant::now();
     let progress = ProgressBar::new_spinner()
