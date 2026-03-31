@@ -19,6 +19,7 @@ pub type JwatchResult<T> = Result<T, Report>;
 
 const VIDEO_EXTENSIONS: &[&str] = &["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"];
 const ACCEPTED_BITRATE_RANGE: std::ops::Range<f64> = 0.2..20.0;
+/// Used for both Audio and Subtitle languages
 const ACCEPTED_LANGS: &[&str] = &["en", "de"];
 
 fn is_video_file(entry: &DirEntry) -> bool {
@@ -115,6 +116,20 @@ fn main() -> JwatchResult<()> {
             if !undesired.is_empty() {
                 reports.push((
                     format!("Undesired languages {}", undesired.join(" ")),
+                    filename.clone(),
+                    mediainfo.clone(),
+                ));
+            }
+
+            let undesired_subs = mediainfo
+                .subtitle_languages
+                .clone()
+                .into_iter()
+                .filter(|l| !desired_langs.contains(&l.as_str()))
+                .collect::<Vec<_>>();
+            if !undesired_subs.is_empty() {
+                reports.push((
+                    format!("Undesired subtitle languages {}", undesired_subs.join(" ")),
                     filename.clone(),
                     mediainfo.clone(),
                 ));

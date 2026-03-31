@@ -135,6 +135,11 @@ pub fn get_mediainfo(
             .filter(|t| t.type_ == "Audio")
             .filter_map(|t| t.language.clone())
             .collect::<Vec<_>>(),
+        subtitle_languages: tracks
+            .iter()
+            .filter(|t| t.type_ == "Text")
+            .filter_map(|t| t.language.clone())
+            .collect::<Vec<_>>(),
         whitelisted: false,
     };
 
