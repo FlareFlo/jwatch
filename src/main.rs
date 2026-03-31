@@ -1,12 +1,11 @@
 use crate::argparse::Args;
 use crate::cachedb::CacheDB;
 use crate::mediainfo::get_mediainfo;
-use color_eyre::eyre::{ContextCompat};
-use color_eyre::{Report, Section};
+use color_eyre::eyre::{bail, ContextCompat};
+use color_eyre::Report;
 use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::fs::File;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use walkdir::{DirEntry, WalkDir};
@@ -67,16 +66,30 @@ fn main() -> JwatchResult<()> {
     progress.enable_steady_tick(Duration::from_millis(50));
 
     let mut reports = vec![];
+    let mut errors = 0u32;
     for path in files.into_iter().progress_with(progress.clone()) {
         let path = path?;
-        let file = File::open(&path)?;
-        if file.metadata()?.is_file() {
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => m,
+            Err(e) => {
+                progress.println(format!("stat: {}: {}", e, path.display()));
+                errors += 1;
+                continue;
+            }
+        };
+        if metadata.is_file() {
             progress.set_message(format!(
                 "processing {}",
                 path.file_name().context("missing file name")?.display()
             ));
-            let mediainfo = get_mediainfo(&path, file.metadata()?, &cachedb)
-                .with_note(|| format!("Occurred in: {}", path.display()))?;
+            let mediainfo = match get_mediainfo(&path, metadata, &cachedb) {
+                Ok(m) => m,
+                Err(e) => {
+                    progress.println(format!("mediainfo: {:?}: {}", e, path.display()));
+                    errors += 1;
+                    continue;
+                }
+            };
             let filename = path
                 .file_name()
                 .context("missing file path")?
@@ -114,6 +127,10 @@ fn main() -> JwatchResult<()> {
     }
 
     cachedb.cleanup()?;
+
+    if errors > 0 {
+        bail!("{errors} file(s) failed to process");
+    }
 
     Ok(())
 }
