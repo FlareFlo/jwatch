@@ -1,8 +1,8 @@
-use crate::JwatchResult;
 use crate::metastructs::Codec;
 use crate::metastructs::MediaInfo;
-use color_eyre::eyre::{Context, ContextCompat, bail};
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::JwatchResult;
+use color_eyre::eyre::{bail, Context, ContextCompat};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
 use std::hash::{DefaultHasher, Hasher};
 use std::path::Path;
@@ -49,11 +49,12 @@ impl CacheDB {
     last_checked INTEGER NOT NULL,
     mtime INTEGER NOT NULL,
     languages TEXT NOT NULL,
+    subtitle_languages TEXT NOT NULL,
     whitelisted BOOLEAN NOT NULL
 	)";
         let mut h = DefaultHasher::new();
         h.write(dbschema.as_bytes());
-        let hash = h.finish() as i32; // Yes this truncates a bit, doesnt matter though.
+        let hash = h.finish() as i32; // Yes this truncates a bit, doesn't matter though.
         let dbhash: i32 = selbst
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -79,7 +80,7 @@ impl CacheDB {
             .query_one(
                 //language=sqlite
                 "
-		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, whitelisted
+		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, subtitle_languages, whitelisted
 		FROM media
 		WHERE path = ?1
 	",
@@ -100,7 +101,8 @@ impl CacheDB {
                         last_checked: OffsetDateTime::from_unix_timestamp(row.get(7)?).unwrap(),
                         mtime: row.get(8)?,
                         languages: row.get::<_, String>(9)?.split(' ').map(str::to_owned).collect(),
-                        whitelisted: row.get(10)?,
+                        subtitle_languages: row.get::<_, String>(10)?.split(' ').map(str::to_owned).collect(),
+                        whitelisted: row.get(11)?,
                     })
                 },
             )
@@ -117,8 +119,8 @@ impl CacheDB {
             //language=sqlite
             "\
 	INSERT OR REPLACE INTO media
-	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, whitelisted)
-	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, subtitle_languages, whitelisted)
+	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 	",
             (
                 p.as_ref()
@@ -134,6 +136,7 @@ impl CacheDB {
                 media_info.last_checked.unix_timestamp(),
                 media_info.mtime,
                 media_info.languages.join(" "),
+                media_info.subtitle_languages.join(" "),
                 media_info.whitelisted,
             ),
         )?;
