@@ -42,16 +42,17 @@ pub struct CacheDB {
 }
 
 impl CacheDB {
-    pub fn init_cachedb(path: &str) -> JwatchResult<Self> {
-        let db_file = Path::new(path).join("_jwatch.sqlite");
-        let mut connection = Connection::open(&db_file)?;
+    /// `db_file` is the exact database file to open/create
+    pub fn init_cachedb(db_file: &Path) -> JwatchResult<Self> {
+        let mut connection = Connection::open(db_file)?;
         let db_app_id: i32 /* Type inference somehow thinks this should be !*/ = connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
         let schema_version: i32 =
             connection.pragma_query_value(None, "schema_version", |row| row.get(0))?;
         if db_app_id != DB_APP_ID && schema_version != 0 {
             // Schema 0 means the DB is uninitialized
             panic!(
-                "Database app ID missmatch, refusing to touch it\nIf youre confident it is the correct one, you can manually delete it at {path}"
+                "Database app ID mismatch, refusing to touch it\nIf you're confident it is the correct one, you can manually delete it at {}",
+                db_file.display()
             );
         }
 
@@ -87,8 +88,8 @@ impl CacheDB {
                 .close()
                 .map_err(|e| e.1)
                 .context("failed to close cachedb while migrating")?;
-            fs::remove_file(&db_file)?;
-            connection = Connection::open(&db_file)?;
+            fs::remove_file(db_file)?;
+            connection = Connection::open(db_file)?;
             connection.pragma_update(None, "application_id", &DB_APP_ID)?;
         }
         connection.pragma_update(None, "user_version", &hash)?;

@@ -6,7 +6,7 @@ use color_eyre::eyre::{ContextCompat, bail};
 use indicatif::{HumanBytes, ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use walkdir::{DirEntry, WalkDir};
 
@@ -37,7 +37,12 @@ fn main() -> JwatchResult<()> {
     color_eyre::install()?;
     let args: Args = argh::from_env();
     let path = args.path;
-    let cachedb = CacheDB::init_cachedb(args.db_path.as_deref().unwrap_or(&path))?; // TODO: DEDUP
+    // --db-path names the exact db file; by default it lives inside the scanned folder
+    let db_file = args
+        .db_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(&path).join("jwatch.sqlite"));
+    let cachedb = CacheDB::init_cachedb(&db_file)?;
 
     let start = Instant::now();
     let progress = ProgressBar::new_spinner()
