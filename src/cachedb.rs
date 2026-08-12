@@ -16,6 +16,12 @@ use time::OffsetDateTime;
 const DB_APP_ID: i32 = i32::from_le_bytes([b'j', b'w', b'a', b't']);
 /// Stores are grouped into transactions of this many INSERTs to avoid a commit+fsync per file
 const STORE_BATCH_SIZE: u32 = 64;
+/// Bumped when the *contents* we store change shape while the SQL schema stays the same,
+/// forcing the same wipe-and-reprobe path a schema change takes. Without this, rows written
+/// by an older version linger forever / until the underlying file changes.
+///
+/// 2: untagged tracks are recorded as "und" instead of being dropped
+const CACHE_FORMAT_VERSION: u32 = 2;
 
 /// Space-separated `lang:size` pairs, e.g. "en:123456 fr:0"
 fn serialize_lang_tracks(tracks: &[LangTrack]) -> String {
@@ -80,6 +86,7 @@ impl CacheDB {
 	)";
         let mut hasher = DefaultHasher::new();
         hasher.write(dbschema.as_bytes());
+        hasher.write_u32(CACHE_FORMAT_VERSION);
         let hash = hasher.finish() as i32; // Yes this truncates a bit, doesn't matter though.
         let dbhash: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
@@ -160,7 +167,7 @@ impl CacheDB {
         }
         self.connection.execute(
             //language=sqlite
-            "\
+            "
 	INSERT OR REPLACE INTO media
 	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, audio_tracks, subtitle_tracks, whitelisted)
 	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
