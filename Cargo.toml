@@ -13,3 +13,8 @@ walkdir = "2.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 ctrlc = "3.5.2"
+# Already in the tree via indicatif; used directly for TTY-aware colouring
+console = "0.16.1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,9 +1,11 @@
 use crate::argparse::Args;
 use crate::cachedb::CacheDB;
+use crate::lang::{is_undefined_lang, is_undesired_lang};
 use crate::mediainfo::probe_mediainfo;
 use crate::metastructs::MediaInfo;
 use color_eyre::Report;
 use color_eyre::eyre::{ContextCompat, bail, eyre};
+use console::style;
 use indicatif::{HumanBytes, ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -16,6 +18,8 @@ use walkdir::{DirEntry, WalkDir};
 
 mod argparse;
 mod cachedb;
+mod fix;
+mod lang;
 mod mediainfo;
 mod metastructs;
 
@@ -23,31 +27,77 @@ pub type JwatchResult<T> = Result<T, Report>;
 
 const VIDEO_EXTENSIONS: &[&str] = &["mkv", "mp4", "avi", "mov", "flv", "wmv", "webm", "m4v"];
 const ACCEPTED_BITRATE_RANGE: std::ops::Range<f64> = 0.2..20.0;
-const ACCEPTED_LANGS: &[&str] = &["en", "de"];
+
+enum Level {
+    /// Something we would act on, counted as a non-ideal file
+    Undesired,
+    /// Informational only: nothing here can be fixed automatically
+    Warning,
+}
+
+struct Finding {
+    level: Level,
+    reason: String,
+    filename: String,
+}
+
+impl Finding {
+    fn undesired(reason: String, filename: String) -> Self {
+        Self {
+            level: Level::Undesired,
+            reason,
+            filename,
+        }
+    }
+
+    fn warning(reason: String, filename: String) -> Self {
+        Self {
+            level: Level::Warning,
+            reason,
+            filename,
+        }
+    }
+}
+
+/// Our own scratch files; the name ends in .mkv, so extension matching alone claims them
+fn is_stale_tmp(entry: &DirEntry) -> bool {
+    !entry.file_type().is_dir() && entry.file_name().to_string_lossy().contains(".jwatch-tmp.")
+}
 
 fn is_video_file(entry: &DirEntry) -> bool {
-    entry
-        .path()
-        .extension()
-        .map(OsStr::to_string_lossy)
-        .map(|ext| {
-            let ext = ext.to_ascii_lowercase();
-            VIDEO_EXTENSIONS.contains(&ext.as_str())
-        })
-        .unwrap_or(false)
+    !entry.file_type().is_dir()
+        && entry
+            .path()
+            .extension()
+            .map(OsStr::to_string_lossy)
+            .map(|ext| {
+                let ext = ext.to_ascii_lowercase();
+                VIDEO_EXTENSIONS.contains(&ext.as_str())
+            })
+            .unwrap_or(false)
 }
 
 fn main() -> JwatchResult<()> {
     color_eyre::install()?;
     let args: Args = argh::from_env();
-    let path = args.path;
+    let run_fix = args.fix || args.dry_run;
+    if args.apply.is_some() && !run_fix {
+        bail!("--apply requires --fix (or --dry-run to preview)");
+    }
+    let path = &args.path;
     let jobs = args.jobs.max(1);
     // --db-path names the exact db file; by default it lives inside the scanned folder
     let db_file = args
         .db_path
         .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(&path).join("jwatch.sqlite"));
+        .unwrap_or_else(|| Path::new(path).join("jwatch.sqlite"));
     let cachedb = CacheDB::init_cachedb(&db_file)?;
+
+    let fix_backend = if run_fix {
+        Some(fix::detect_backend()?)
+    } else {
+        None
+    };
 
     // The handler runs on its own thread and cannot touch the (!Sync) db connection,
     // so it only raises a flag; the loops below stop on it, and the normal
@@ -83,11 +133,20 @@ fn main() -> JwatchResult<()> {
         )
         .with_finish(ProgressFinish::WithMessage(Cow::Borrowed("indexed media")));
 
-    let files: Vec<PathBuf> = WalkDir::new(&path)
+    let mut stale_tmp: Vec<PathBuf> = vec![];
+    let files: Vec<PathBuf> = WalkDir::new(path)
         .into_iter()
         .take_while(|_| !interrupted.load(Ordering::Relaxed))
-        .filter(|e| e.as_ref().map(is_video_file).unwrap_or(false))
-        .map(|e| e.map(DirEntry::into_path))
+        // Stale first; a temp file also matches is_video_file
+        .filter_map(|e| match e {
+            Err(e) => Some(Err(e)),
+            Ok(entry) if is_stale_tmp(&entry) => {
+                stale_tmp.push(entry.into_path());
+                None
+            }
+            Ok(entry) if is_video_file(&entry) => Some(Ok(entry.into_path())),
+            Ok(_) => None,
+        })
         .progress_with(progress)
         .collect::<Result<_, _>>()?;
 
@@ -131,7 +190,7 @@ fn main() -> JwatchResult<()> {
         // The workers hold the remaining senders; the loop below ends when they finish
         drop(tx);
 
-        // All DB access stays on this thread — the connection is !Sync
+        // All DB access stays on this thread; the connection is !Sync
         for (i, outcome) in rx {
             progress.inc(1);
             match outcome {
@@ -163,7 +222,9 @@ fn main() -> JwatchResult<()> {
     });
     progress.finish_using_style();
 
-    let mut reports = vec![];
+    let mut findings: Vec<Finding> = vec![];
+    let mut fix_candidates: Vec<(&PathBuf, &MediaInfo)> = vec![];
+    let mut non_mkv_fixables = 0u32;
     let mut files_non_ideal = 0u64;
     let mut saved_video = 0u64;
     let mut saved_audio = 0u64;
@@ -172,75 +233,120 @@ fn main() -> JwatchResult<()> {
         let Some(mediainfo) = mediainfo else {
             continue;
         };
-        {
-            let reports_before = reports.len();
-            let filename = path
-                .file_name()
-                .context("missing file path")?
-                .to_string_lossy()
-                .to_string();
+        let filename = path
+            .file_name()
+            .context("missing file path")?
+            .to_string_lossy()
+            .to_string();
+        // Warnings are informational, so they must not make a file count as non-ideal
+        let mut has_defect = false;
 
-            if !ACCEPTED_BITRATE_RANGE.contains(&mediainfo.megabitrate()) {
-                let reason = format!(
-                    "Undesired bitrate: {:<4.1} mbit/s with codec {:<4}",
-                    mediainfo.megabitrate(),
-                    mediainfo.codec,
-                );
-                if mediainfo.megabitrate() >= ACCEPTED_BITRATE_RANGE.end {
-                    let max_bytes_per_sec = ACCEPTED_BITRATE_RANGE.end * 2.0_f64.powi(20) / 8.0;
-                    let bytes_per_sec = mediainfo.bitrate as f64 / 8.0;
-                    saved_video += ((bytes_per_sec - max_bytes_per_sec)
-                        * mediainfo.duration.as_secs_f64())
-                        as u64;
-                }
-                reports.push((reason, filename.clone(), mediainfo.clone()));
+        if !ACCEPTED_BITRATE_RANGE.contains(&mediainfo.megabitrate()) {
+            let reason = format!(
+                "Undesired bitrate: {:<4.1} mbit/s with codec {:<4}",
+                mediainfo.megabitrate(),
+                mediainfo.codec,
+            );
+            if mediainfo.megabitrate() >= ACCEPTED_BITRATE_RANGE.end {
+                let max_bytes_per_sec = ACCEPTED_BITRATE_RANGE.end * 2.0_f64.powi(20) / 8.0;
+                let bytes_per_sec = mediainfo.bitrate as f64 / 8.0;
+                saved_video +=
+                    ((bytes_per_sec - max_bytes_per_sec) * mediainfo.duration.as_secs_f64()) as u64;
             }
+            findings.push(Finding::undesired(reason, filename.clone()));
+            has_defect = true;
+        }
 
-            let desired_langs = ACCEPTED_LANGS;
-            let undesired = mediainfo
-                .audio_language
+        let undesired = mediainfo
+            .audio_language
+            .iter()
+            .filter(|t| is_undesired_lang(Some(&t.language)))
+            .collect::<Vec<_>>();
+        if !undesired.is_empty() {
+            saved_audio += undesired.iter().map(|t| t.size).sum::<u64>();
+            let langs = undesired
                 .iter()
-                .filter(|t| !desired_langs.contains(&t.language.as_str()))
+                .map(|t| t.language.as_str())
                 .collect::<Vec<_>>();
-            if !undesired.is_empty() {
-                saved_audio += undesired.iter().map(|t| t.size).sum::<u64>();
-                let langs = undesired
-                    .iter()
-                    .map(|t| t.language.as_str())
-                    .collect::<Vec<_>>();
-                reports.push((
-                    format!("Undesired languages {}", langs.join(" ")),
-                    filename.clone(),
-                    mediainfo.clone(),
-                ));
-            }
+            findings.push(Finding::undesired(
+                format!("Undesired languages {}", langs.join(" ")),
+                filename.clone(),
+            ));
+            has_defect = true;
+        }
 
-            let undesired_subs = mediainfo
-                .subtitle_languages
+        let undesired_subs = mediainfo
+            .subtitle_languages
+            .iter()
+            .filter(|t| is_undesired_lang(Some(&t.language)))
+            .collect::<Vec<_>>();
+        if !undesired_subs.is_empty() {
+            saved_subs += undesired_subs.iter().map(|t| t.size).sum::<u64>();
+            let langs = undesired_subs
                 .iter()
-                .filter(|t| !desired_langs.contains(&t.language.as_str()))
+                .map(|t| t.language.as_str())
                 .collect::<Vec<_>>();
-            if !undesired_subs.is_empty() {
-                saved_subs += undesired_subs.iter().map(|t| t.size).sum::<u64>();
-                let langs = undesired_subs
-                    .iter()
-                    .map(|t| t.language.as_str())
-                    .collect::<Vec<_>>();
-                reports.push((
-                    format!("Undesired subtitle languages {}", langs.join(" ")),
-                    filename.clone(),
-                    mediainfo.clone(),
-                ));
-            }
+            findings.push(Finding::undesired(
+                format!("Undesired subtitle languages {}", langs.join(" ")),
+                filename.clone(),
+            ));
+            has_defect = true;
+        }
 
-            if reports.len() > reports_before {
-                files_non_ideal += 1;
+        // Untagged tracks are never stripped, so these are for the user to retag by hand
+        let count_undefined = |tracks: &[metastructs::LangTrack]| {
+            tracks
+                .iter()
+                .filter(|t| is_undefined_lang(Some(&t.language)))
+                .count()
+        };
+        let undefined_audio = count_undefined(&mediainfo.audio_language);
+        if undefined_audio > 0 {
+            findings.push(Finding::warning(
+                format!("undefined audio language on {undefined_audio} track(s)"),
+                filename.clone(),
+            ));
+        }
+        let undefined_subs = count_undefined(&mediainfo.subtitle_languages);
+        if undefined_subs > 0 {
+            findings.push(Finding::warning(
+                format!("undefined subtitle language on {undefined_subs} track(s)"),
+                filename.clone(),
+            ));
+        }
+
+        if !undesired.is_empty() || !undesired_subs.is_empty() {
+            if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("mkv"))
+            {
+                fix_candidates.push((path, mediainfo));
+            } else {
+                non_mkv_fixables += 1;
             }
+        }
+
+        if has_defect {
+            files_non_ideal += 1;
         }
     }
 
-    for (reason, filename, _mediainfo) in reports {
-        println!("{} found in: {filename}", reason);
+    for p in &stale_tmp {
+        findings.push(Finding::warning(
+            "leftover temp file from an interrupted fix run".to_owned(),
+            p.display().to_string(),
+        ));
+    }
+
+    for finding in &findings {
+        match finding.level {
+            Level::Undesired => println!("{} found in: {}", finding.reason, finding.filename),
+            // style() strips the escapes when stdout is not a terminal
+            Level::Warning => println!(
+                "{}",
+                style(format!("Warning: {}: {}", finding.reason, finding.filename)).yellow()
+            ),
+        }
     }
 
     if interrupted.load(Ordering::Relaxed) {
@@ -257,10 +363,150 @@ fn main() -> JwatchResult<()> {
         HumanBytes(saved_video + saved_audio + saved_subs)
     );
 
+    // Commit cache before the fix pass, which can fail for unrelated reasons
     cachedb.cleanup()?;
 
+    let mut fix_errors = 0u32;
+    let mut skipped = 0u32;
+    if let Some(backend) = fix_backend {
+        // Deliberately sequential and off the worker pool: each remux is a full
+        // read+write of the file, so more than one at a time just thrashes the disk
+        let execute = args.apply.filter(|_| !args.dry_run);
+
+        if fix_candidates.is_empty() {
+            println!("Fix: nothing to do");
+        } else {
+            println!(
+                "Fix pass ({} file(s), via {}):",
+                fix_candidates.len(),
+                backend.name()
+            );
+            let mut fixed = 0u32;
+            let mut fix_delta = 0i64;
+            for (path, mediainfo) in fix_candidates {
+                if interrupted.load(Ordering::Relaxed) {
+                    break;
+                }
+                let plan = match fix::plan_fix(path, mediainfo, backend) {
+                    Ok(Some(plan)) => plan,
+                    Ok(None) => {
+                        println!(
+                            "\tnothing to strip, guards kept every track: {}",
+                            path.display()
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        if interrupted.load(Ordering::Relaxed) {
+                            // mkvmerge -J and mediainfo take the same SIGINT we did
+                            println!("\tinterrupted while planning");
+                        } else {
+                            println!("\tplanning failed: {:?}: {}", e, path.display());
+                            fix_errors += 1;
+                        }
+                        continue;
+                    }
+                };
+                println!("\t{}", plan.command_line());
+                for note in &plan.notes {
+                    println!("\t\tnote: {note}");
+                }
+                let links = fix::hardlinks(path);
+                if links > 1 {
+                    println!(
+                        "{}",
+                        style(format!(
+                            "\t\twarning: {links} hardlinks, remuxing unshares this copy so the original stays on disk"
+                        ))
+                        .yellow()
+                    );
+                }
+                if let Some(mode) = execute {
+                    match fix::apply_fix(&plan, mode) {
+                        Ok(fix::FixOutcome::Fixed(delta)) => {
+                            fixed += 1;
+                            fix_delta += delta;
+                            if delta >= 0 {
+                                println!("\t\tfixed, saved {}", HumanBytes(delta as u64));
+                            } else {
+                                println!("\t\tfixed, grew by {}", HumanBytes(delta.unsigned_abs()));
+                            }
+                        }
+                        Ok(fix::FixOutcome::SkippedTempExists(tmp)) => {
+                            skipped += 1;
+                            println!(
+                                "{}",
+                                style(format!(
+                                    "\t\tskipped, leftover temp file in the way: {}",
+                                    tmp.display()
+                                ))
+                                .yellow()
+                            );
+                        }
+                        Ok(fix::FixOutcome::SkippedBackupExists(bak)) => {
+                            skipped += 1;
+                            println!(
+                                "{}",
+                                style(format!(
+                                    "\t\tskipped, backup already exists: {}",
+                                    bak.display()
+                                ))
+                                .yellow()
+                            );
+                        }
+                        Err(e) => {
+                            if interrupted.load(Ordering::Relaxed) {
+                                // The terminal delivers SIGINT to the remux child too, so
+                                // this failure is our own doing, not a bad file
+                                println!("\t\tinterrupted, original left untouched");
+                            } else {
+                                println!("\t\tfailed: {e:?}");
+                                fix_errors += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            if execute.is_some() {
+                if fix_delta >= 0 {
+                    println!(
+                        "Fixed {fixed} file(s), net saved {}",
+                        HumanBytes(fix_delta as u64)
+                    );
+                } else {
+                    println!(
+                        "Fixed {fixed} file(s), net grew by {}",
+                        HumanBytes(fix_delta.unsigned_abs())
+                    );
+                }
+                if fix_errors > 0 {
+                    println!("{fix_errors} file(s) could not be fixed");
+                }
+            } else {
+                println!(
+                    "Dry run: no files were modified. To apply, add --apply backup (keep originals) or --apply replace (overwrite)."
+                );
+            }
+        }
+        if non_mkv_fixables > 0 {
+            println!(
+                "{non_mkv_fixables} file(s) with undesired tracks skipped: --fix only supports mkv"
+            );
+        }
+    }
+
+    let mut problems = vec![];
     if errors > 0 {
-        bail!("{errors} file(s) failed to process");
+        problems.push(format!("{errors} file(s) failed to process"));
+    }
+    if fix_errors > 0 {
+        problems.push(format!("{fix_errors} file(s) failed to fix"));
+    }
+    if skipped > 0 {
+        problems.push(format!("{skipped} file(s) skipped"));
+    }
+    if !problems.is_empty() {
+        bail!("{}", problems.join(", "));
     }
     if interrupted.load(Ordering::Relaxed) {
         // Conventional exit code for SIGINT
@@ -297,11 +543,10 @@ fn probe_one(
         progress.set_message(format!("processing {}", name.display()));
     }
 
-    let mtime = match metadata
-        .modified()
-        .map_err(Report::new)
-        .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).map_err(Report::new))
-    {
+    let mtime = match metadata.modified().map_err(Report::new).and_then(|m| {
+        m.duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(Report::new)
+    }) {
         Ok(d) => d.as_secs() as i64,
         Err(e) => return ProbeOutcome::Failed(e),
     };
@@ -316,5 +561,37 @@ fn probe_one(
     match probe_mediainfo(path, &metadata) {
         Ok(info) => ProbeOutcome::Fresh(info),
         Err(e) => ProbeOutcome::Failed(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A folder can carry a name matching our scratch pattern; only real files are
+    /// leftovers, and the folder must still be walked normally.
+    #[test]
+    fn only_files_count_as_stale_scratch_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("season.jwatch-tmp.mkv")).unwrap();
+        std::fs::write(dir.path().join("season.jwatch-tmp.mkv/ep1.mkv"), b"x").unwrap();
+        std::fs::write(dir.path().join("a.mkv.jwatch-tmp.mkv"), b"x").unwrap();
+        std::fs::write(dir.path().join("movie.mkv"), b"x").unwrap();
+
+        let mut stale = vec![];
+        let mut videos = vec![];
+        for entry in WalkDir::new(dir.path()).into_iter().map(Result::unwrap) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if is_stale_tmp(&entry) {
+                stale.push(name);
+            } else if is_video_file(&entry) {
+                videos.push(name);
+            }
+        }
+        stale.sort();
+        videos.sort();
+
+        assert_eq!(stale, ["a.mkv.jwatch-tmp.mkv"]);
+        assert_eq!(videos, ["ep1.mkv", "movie.mkv"]);
     }
 }
