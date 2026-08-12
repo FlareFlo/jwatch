@@ -2,8 +2,9 @@ use crate::JwatchResult;
 use crate::metastructs::Codec;
 use crate::metastructs::{LangTrack, MediaInfo};
 use color_eyre::eyre::{Context, ContextCompat, bail};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::Connection;
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::fs;
 use std::hash::{DefaultHasher, Hasher};
 use std::path::Path;
@@ -111,39 +112,41 @@ impl CacheDB {
         })
     }
 
-    pub fn get_from_cachedb(&self, p: impl AsRef<Path>) -> JwatchResult<Option<MediaInfo>> {
-        let res = self.connection
-            .query_one(
-                //language=sqlite
-                "
+    /// Loads the entire cache, keyed by filename. Worker threads cannot touch the
+    /// (!Sync) connection, so lookups run against this in-memory snapshot instead.
+    pub fn load_all(&self) -> JwatchResult<HashMap<String, MediaInfo>> {
+        let mut stmt = self.connection.prepare(
+            //language=sqlite
+            "
 		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, audio_tracks, subtitle_tracks, whitelisted
 		FROM media
-		WHERE path = ?1
 	",
-                params![
-                    p.as_ref()
-                        .file_name()
-                        .context("missing filename")?
-                        .to_string_lossy()
-                ],
-                |row| {
-                    Ok(MediaInfo {
-                        duration: Duration::from_millis(row.get(1)?),
-                        size: row.get(2)?,
-                        bitrate: row.get(3)?,
-                        height: row.get(4)?,
-                        width: row.get(5)?,
-                        codec: Codec::from_str(row.get_ref(6)?.as_str()?),
-                        last_checked: OffsetDateTime::from_unix_timestamp(row.get(7)?).unwrap(),
-                        mtime: row.get(8)?,
-                        audio_language: parse_lang_tracks(&row.get::<_, String>(9)?),
-                        subtitle_languages: parse_lang_tracks(&row.get::<_, String>(10)?),
-                        whitelisted: row.get(11)?,
-                    })
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                MediaInfo {
+                    duration: Duration::from_millis(row.get(1)?),
+                    size: row.get(2)?,
+                    bitrate: row.get(3)?,
+                    height: row.get(4)?,
+                    width: row.get(5)?,
+                    codec: Codec::from_str(row.get_ref(6)?.as_str()?),
+                    last_checked: OffsetDateTime::from_unix_timestamp(row.get(7)?).unwrap(),
+                    mtime: row.get(8)?,
+                    audio_language: parse_lang_tracks(&row.get::<_, String>(9)?),
+                    subtitle_languages: parse_lang_tracks(&row.get::<_, String>(10)?),
+                    whitelisted: row.get(11)?,
                 },
-            )
-            .optional()?;
-        Ok(res)
+            ))
+        })?;
+
+        let mut map = HashMap::new();
+        for row in rows {
+            let (filename, info) = row?;
+            map.insert(filename, info);
+        }
+        Ok(map)
     }
 
     pub fn store_to_cachedb(

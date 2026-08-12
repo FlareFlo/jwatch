@@ -8,4 +8,8 @@ pub struct Args {
     #[argh(option)]
     /// path to cache database
     pub db_path: Option<String>,
+
+    #[argh(option, short = 'j', default = "2")]
+    /// number of parallel mediainfo probes
+    pub jobs: usize,
 }

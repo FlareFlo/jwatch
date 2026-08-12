@@ -1,7 +1,5 @@
 use crate::JwatchResult;
-use crate::cachedb::CacheDB;
 use crate::metastructs::{Codec, LangTrack, MediaInfo};
-use color_eyre::Help;
 use color_eyre::eyre::{ContextCompat, bail, eyre};
 use serde::Deserialize;
 use std::fs::Metadata;
@@ -57,23 +55,11 @@ impl Track {
     }
 }
 
-pub fn get_mediainfo(
+/// Runs mediainfo on the file; no cache involved
+pub fn probe_mediainfo(
     p: impl AsRef<Path> + std::fmt::Debug,
-    metadata: Metadata,
-    cachedb: &CacheDB,
+    metadata: &Metadata,
 ) -> JwatchResult<MediaInfo> {
-    if let Some(info) = cachedb
-        .get_from_cachedb(&p)
-        .note("Database needs migration?")?
-        && info.mtime
-            == metadata
-                .modified()?
-                .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_secs() as i64
-    {
-        return Ok(info);
-    }
-
     let cmd = Command::new("mediainfo")
         .arg("--Language=raw")
         .arg("--Full")
@@ -140,7 +126,9 @@ pub fn get_mediainfo(
                 .as_ref()
                 .with_context(|| format!("missing Format in Video track for {p:?}"))?,
         ),
-        last_checked: OffsetDateTime::now_local()?,
+        // now_utc, not now_local: the time crate can refuse local-offset queries in
+        // multithreaded processes, and this is stored as a unix timestamp anyway
+        last_checked: OffsetDateTime::now_utc(),
         mtime: metadata
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)?
@@ -157,8 +145,6 @@ pub fn get_mediainfo(
             .collect::<Vec<_>>(),
         whitelisted: false,
     };
-
-    cachedb.store_to_cachedb(p, &info)?;
 
     Ok(info)
 }
