@@ -3,6 +3,7 @@ use crate::metastructs::Codec;
 use crate::metastructs::{LangTrack, MediaInfo};
 use color_eyre::eyre::{Context, ContextCompat, bail};
 use rusqlite::{Connection, OptionalExtension, params};
+use std::cell::Cell;
 use std::fs;
 use std::hash::{DefaultHasher, Hasher};
 use std::path::Path;
@@ -12,6 +13,8 @@ use std::time::Duration;
 use time::OffsetDateTime;
 
 const DB_APP_ID: i32 = i32::from_le_bytes([b'j', b'w', b'a', b't']);
+/// Stores are grouped into transactions of this many INSERTs to avoid a commit+fsync per file
+const STORE_BATCH_SIZE: u32 = 64;
 
 /// Space-separated `lang:size` pairs, e.g. "en:123456 fr:0"
 fn serialize_lang_tracks(tracks: &[LangTrack]) -> String {
@@ -39,6 +42,8 @@ fn parse_lang_tracks(s: &str) -> Vec<LangTrack> {
 pub struct CacheDB {
     // We derive Debug here, so all new fields must
     connection: Arc<Connection>,
+    // Beware: a clone() gets its own counter while sharing the connection's transaction state
+    pending_stores: Cell<u32>,
 }
 
 impl CacheDB {
@@ -95,8 +100,14 @@ impl CacheDB {
         connection.pragma_update(None, "user_version", &hash)?;
 
         connection.execute(dbschema, ())?;
+
+        // journal_mode returns a result row, so plain pragma_update would fail
+        connection.pragma_update_and_check(None, "journal_mode", "WAL", |_| Ok(()))?;
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
+
         Ok(Self {
             connection: Arc::new(connection),
+            pending_stores: Cell::new(0),
         })
     }
 
@@ -140,6 +151,10 @@ impl CacheDB {
         p: impl AsRef<Path>,
         media_info: &MediaInfo,
     ) -> JwatchResult<()> {
+        if self.connection.is_autocommit() {
+            // Running BEGIN switches out of autocommit mode and starts the batch
+            self.connection.execute_batch("BEGIN")?;
+        }
         self.connection.execute(
             //language=sqlite
             "\
@@ -165,11 +180,24 @@ impl CacheDB {
                 media_info.whitelisted,
             ),
         )?;
+
+        let pending = self.pending_stores.get() + 1;
+        if pending >= STORE_BATCH_SIZE {
+            self.connection.execute_batch("COMMIT")?;
+            self.pending_stores.set(0);
+        } else {
+            self.pending_stores.set(pending);
+        }
         Ok(())
     }
 
     /// Not just drop due to error handling
     pub fn cleanup(mut self) -> JwatchResult<()> {
+        if !self.connection.is_autocommit() {
+            // Persist the partial store batch
+            self.connection.execute_batch("COMMIT")?;
+        }
+
         let mut attempt = 0;
         // Manual loop because for cannot be broken out of
         // Attempt to drop DB for 10 seconds once every second
