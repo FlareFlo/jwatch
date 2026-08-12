@@ -21,14 +21,11 @@ pub struct CacheDB {
 
 impl CacheDB {
     pub fn init_cachedb(path: &str) -> JwatchResult<Self> {
-        let mut selbst = Self {
-            connection: Arc::new(Connection::open(path.to_owned() + "jwatch.sqlite")?),
-        };
-        let db_app_id: i32 /* Type inference somehow thinks this should be !*/ = selbst.connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+        let db_file = Path::new(path).join("_jwatch.sqlite");
+        let mut connection = Connection::open(&db_file)?;
+        let db_app_id: i32 /* Type inference somehow thinks this should be !*/ = connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
         let schema_version: i32 =
-            selbst
-                .connection
-                .pragma_query_value(None, "schema_version", |row| row.get(0))?;
+            connection.pragma_query_value(None, "schema_version", |row| row.get(0))?;
         if db_app_id != DB_APP_ID && schema_version != 0 {
             // Schema 0 means the DB is uninitialized
             panic!(
@@ -54,24 +51,29 @@ impl CacheDB {
         let mut h = DefaultHasher::new();
         h.write(dbschema.as_bytes());
         let hash = h.finish() as i32; // Yes this truncates a bit, doesnt matter though.
-        let dbhash: i32 = selbst
-            .connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let dbhash: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
         if hash != dbhash {
-            eprintln!("DB schema out of date, migrating...");
-            fs::remove_file(&path)?;
-            selbst.connection = Arc::new(Connection::open(&path)?);
-            selbst
-                .connection
-                .pragma_update(None, "application_id", &DB_APP_ID)?;
+            if dbhash != 0 {
+                // user_version 0 means the DB was just created, nothing to migrate
+                eprintln!("DB schema out of date, migrating...");
+            } else {
+                eprintln!("Fresh db created, migrating...");
+            }
+            connection
+                .close()
+                .map_err(|e| e.1)
+                .context("failed to close cachedb while migrating")?;
+            fs::remove_file(&db_file)?;
+            connection = Connection::open(&db_file)?;
+            connection.pragma_update(None, "application_id", &DB_APP_ID)?;
         }
-        selbst
-            .connection
-            .pragma_update(None, "user_version", &hash)?;
+        connection.pragma_update(None, "user_version", &hash)?;
 
-        selbst.connection.execute(dbschema, ())?;
-        Ok(selbst)
+        connection.execute(dbschema, ())?;
+        Ok(Self {
+            connection: Arc::new(connection),
+        })
     }
 
     pub fn get_from_cachedb(&self, p: impl AsRef<Path>) -> JwatchResult<Option<MediaInfo>> {

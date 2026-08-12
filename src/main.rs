@@ -1,8 +1,8 @@
 use crate::argparse::Args;
 use crate::cachedb::CacheDB;
 use crate::mediainfo::get_mediainfo;
-use color_eyre::eyre::{bail, ContextCompat};
 use color_eyre::Report;
+use color_eyre::eyre::{ContextCompat, bail};
 use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use std::borrow::Cow;
 use std::ffi::OsStr;
