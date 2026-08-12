@@ -1,6 +1,6 @@
 use crate::JwatchResult;
 use crate::metastructs::Codec;
-use crate::metastructs::MediaInfo;
+use crate::metastructs::{LangTrack, MediaInfo};
 use color_eyre::eyre::{Context, ContextCompat, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::fs;
@@ -12,6 +12,28 @@ use std::time::Duration;
 use time::OffsetDateTime;
 
 const DB_APP_ID: i32 = i32::from_le_bytes([b'j', b'w', b'a', b't']);
+
+/// Space-separated `lang:size` pairs, e.g. "en:123456 fr:0"
+fn serialize_lang_tracks(tracks: &[LangTrack]) -> String {
+    tracks
+        .iter()
+        .map(|t| format!("{}:{}", t.language, t.size))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn parse_lang_tracks(s: &str) -> Vec<LangTrack> {
+    s.split(' ')
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let (language, size) = p.rsplit_once(':').unwrap_or((p, "0"));
+            LangTrack {
+                language: language.to_owned(),
+                size: size.parse().unwrap_or(0),
+            }
+        })
+        .collect()
+}
 
 #[derive(Clone)]
 pub struct CacheDB {
@@ -45,13 +67,13 @@ impl CacheDB {
 	codec TEXT NOT NULL,
     last_checked INTEGER NOT NULL,
     mtime INTEGER NOT NULL,
-    languages TEXT NOT NULL,
-    subtitle_languages TEXT NOT NULL,
+    audio_tracks TEXT NOT NULL,
+    subtitle_tracks TEXT NOT NULL,
     whitelisted BOOLEAN NOT NULL
 	)";
-        let mut h = DefaultHasher::new();
-        h.write(dbschema.as_bytes());
-        let hash = h.finish() as i32; // Yes this truncates a bit, doesnt matter though.
+        let mut hasher = DefaultHasher::new();
+        hasher.write(dbschema.as_bytes());
+        let hash = hasher.finish() as i32; // Yes this truncates a bit, doesn't matter though.
         let dbhash: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
         if hash != dbhash {
@@ -82,7 +104,7 @@ impl CacheDB {
             .query_one(
                 //language=sqlite
                 "
-		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, subtitle_languages, whitelisted
+		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, audio_tracks, subtitle_tracks, whitelisted
 		FROM media
 		WHERE path = ?1
 	",
@@ -102,9 +124,8 @@ impl CacheDB {
                         codec: Codec::from_str(row.get_ref(6)?.as_str()?),
                         last_checked: OffsetDateTime::from_unix_timestamp(row.get(7)?).unwrap(),
                         mtime: row.get(8)?,
-                        // filter guards against "" splitting into one empty-string language
-                        languages: row.get::<_, String>(9)?.split(' ').filter(|s| !s.is_empty()).map(str::to_owned).collect(),
-                        subtitle_languages: row.get::<_, String>(10)?.split(' ').filter(|s| !s.is_empty()).map(str::to_owned).collect(),
+                        audio_language: parse_lang_tracks(&row.get::<_, String>(9)?),
+                        subtitle_languages: parse_lang_tracks(&row.get::<_, String>(10)?),
                         whitelisted: row.get(11)?,
                     })
                 },
@@ -122,7 +143,7 @@ impl CacheDB {
             //language=sqlite
             "\
 	INSERT OR REPLACE INTO media
-	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, subtitle_languages, whitelisted)
+	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, audio_tracks, subtitle_tracks, whitelisted)
 	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 	",
             (
@@ -138,8 +159,8 @@ impl CacheDB {
                 media_info.codec.to_string(),
                 media_info.last_checked.unix_timestamp(),
                 media_info.mtime,
-                media_info.languages.join(" "),
-                media_info.subtitle_languages.join(" "),
+                serialize_lang_tracks(&media_info.audio_language),
+                serialize_lang_tracks(&media_info.subtitle_languages),
                 media_info.whitelisted,
             ),
         )?;

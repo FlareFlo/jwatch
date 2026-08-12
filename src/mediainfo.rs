@@ -1,6 +1,6 @@
 use crate::JwatchResult;
 use crate::cachedb::CacheDB;
-use crate::metastructs::{Codec, MediaInfo};
+use crate::metastructs::{Codec, LangTrack, MediaInfo};
 use color_eyre::Help;
 use color_eyre::eyre::{ContextCompat, bail, eyre};
 use serde::Deserialize;
@@ -40,6 +40,21 @@ struct Track {
     format: Option<String>,
     #[serde(rename = "Language")]
     language: Option<String>,
+    #[serde(rename = "StreamSize")]
+    stream_size: Option<String>,
+}
+
+impl Track {
+    fn to_lang_track(&self) -> Option<LangTrack> {
+        Some(LangTrack {
+            language: self.language.clone()?,
+            size: self
+                .stream_size
+                .as_deref()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+        })
+    }
 }
 
 pub fn get_mediainfo(
@@ -130,15 +145,15 @@ pub fn get_mediainfo(
             .modified()?
             .duration_since(SystemTime::UNIX_EPOCH)?
             .as_secs() as i64,
-        languages: tracks
+        audio_language: tracks
             .iter()
             .filter(|t| t.type_ == "Audio")
-            .filter_map(|t| t.language.clone())
+            .filter_map(Track::to_lang_track)
             .collect::<Vec<_>>(),
         subtitle_languages: tracks
             .iter()
             .filter(|t| t.type_ == "Text")
-            .filter_map(|t| t.language.clone())
+            .filter_map(Track::to_lang_track)
             .collect::<Vec<_>>(),
         whitelisted: false,
     };

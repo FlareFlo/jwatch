@@ -14,9 +14,16 @@ pub struct MediaInfo {
     pub codec: Codec,
     pub last_checked: OffsetDateTime,
     pub mtime: i64, // Last modification of file in seconds
-    pub languages: Vec<String>,
-    pub subtitle_languages: Vec<String>,
+    pub audio_language: Vec<LangTrack>,
+    pub subtitle_languages: Vec<LangTrack>,
     pub whitelisted: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LangTrack {
+    pub language: String,
+    /// Stream size in bytes, 0 if the container carries no per-track statistics
+    pub size: u64,
 }
 
 impl MediaInfo {

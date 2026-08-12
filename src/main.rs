@@ -3,7 +3,7 @@ use crate::cachedb::CacheDB;
 use crate::mediainfo::get_mediainfo;
 use color_eyre::Report;
 use color_eyre::eyre::{ContextCompat, bail};
-use indicatif::{ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
+use indicatif::{HumanBytes, ProgressBar, ProgressFinish, ProgressIterator, ProgressStyle};
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -67,6 +67,11 @@ fn main() -> JwatchResult<()> {
 
     let mut reports = vec![];
     let mut errors = 0u32;
+    let mut files_total = 0u64;
+    let mut files_non_ideal = 0u64;
+    let mut saved_video = 0u64;
+    let mut saved_audio = 0u64;
+    let mut saved_subs = 0u64;
     for path in files.into_iter().progress_with(progress.clone()) {
         let path = path?;
         let metadata = match std::fs::metadata(&path) {
@@ -78,6 +83,8 @@ fn main() -> JwatchResult<()> {
             }
         };
         if metadata.is_file() {
+            files_total += 1;
+            let reports_before = reports.len();
             progress.set_message(format!(
                 "processing {}",
                 path.file_name().context("missing file name")?.display()
@@ -102,19 +109,30 @@ fn main() -> JwatchResult<()> {
                     mediainfo.megabitrate(),
                     mediainfo.codec,
                 );
+                if mediainfo.megabitrate() >= ACCEPTED_BITRATE_RANGE.end {
+                    let max_bytes_per_sec = ACCEPTED_BITRATE_RANGE.end * 2.0_f64.powi(20) / 8.0;
+                    let bytes_per_sec = mediainfo.bitrate as f64 / 8.0;
+                    saved_video += ((bytes_per_sec - max_bytes_per_sec)
+                        * mediainfo.duration.as_secs_f64())
+                        as u64;
+                }
                 reports.push((reason, filename.clone(), mediainfo.clone()));
             }
 
             let desired_langs = ACCEPTED_LANGS;
             let undesired = mediainfo
-                .languages
-                .clone()
-                .into_iter()
-                .filter(|l| !desired_langs.contains(&l.as_str()))
+                .audio_language
+                .iter()
+                .filter(|t| !desired_langs.contains(&t.language.as_str()))
                 .collect::<Vec<_>>();
             if !undesired.is_empty() {
+                saved_audio += undesired.iter().map(|t| t.size).sum::<u64>();
+                let langs = undesired
+                    .iter()
+                    .map(|t| t.language.as_str())
+                    .collect::<Vec<_>>();
                 reports.push((
-                    format!("Undesired languages {}", undesired.join(" ")),
+                    format!("Undesired languages {}", langs.join(" ")),
                     filename.clone(),
                     mediainfo.clone(),
                 ));
@@ -122,16 +140,24 @@ fn main() -> JwatchResult<()> {
 
             let undesired_subs = mediainfo
                 .subtitle_languages
-                .clone()
-                .into_iter()
-                .filter(|l| !desired_langs.contains(&l.as_str()))
+                .iter()
+                .filter(|t| !desired_langs.contains(&t.language.as_str()))
                 .collect::<Vec<_>>();
             if !undesired_subs.is_empty() {
+                saved_subs += undesired_subs.iter().map(|t| t.size).sum::<u64>();
+                let langs = undesired_subs
+                    .iter()
+                    .map(|t| t.language.as_str())
+                    .collect::<Vec<_>>();
                 reports.push((
-                    format!("Undesired subtitle languages {}", undesired_subs.join(" ")),
+                    format!("Undesired subtitle languages {}", langs.join(" ")),
                     filename.clone(),
                     mediainfo.clone(),
                 ));
+            }
+
+            if reports.len() > reports_before {
+                files_non_ideal += 1;
             }
         }
     }
@@ -139,6 +165,17 @@ fn main() -> JwatchResult<()> {
     for (reason, filename, _mediainfo) in reports {
         println!("{} found in: {filename}", reason);
     }
+
+    println!("Summary:");
+    println!("\tNon-ideal files: {files_non_ideal}/{files_total}");
+    println!("\tMinimum savings:");
+    println!("\t\tVideo:     {}", HumanBytes(saved_video));
+    println!("\t\tAudio:     {}", HumanBytes(saved_audio));
+    println!("\t\tSubtitles: {}", HumanBytes(saved_subs));
+    println!(
+        "\t\tTotal:     {}",
+        HumanBytes(saved_video + saved_audio + saved_subs)
+    );
 
     cachedb.cleanup()?;
 
