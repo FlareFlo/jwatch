@@ -119,6 +119,20 @@ fn main() -> JwatchResult<()> {
                     mediainfo.clone(),
                 ));
             }
+
+            let undesired_subs = mediainfo
+                .subtitle_languages
+                .clone()
+                .into_iter()
+                .filter(|l| !desired_langs.contains(&l.as_str()))
+                .collect::<Vec<_>>();
+            if !undesired_subs.is_empty() {
+                reports.push((
+                    format!("Undesired subtitle languages {}", undesired_subs.join(" ")),
+                    filename.clone(),
+                    mediainfo.clone(),
+                ));
+            }
         }
     }
 

@@ -46,6 +46,7 @@ impl CacheDB {
     last_checked INTEGER NOT NULL,
     mtime INTEGER NOT NULL,
     languages TEXT NOT NULL,
+    subtitle_languages TEXT NOT NULL,
     whitelisted BOOLEAN NOT NULL
 	)";
         let mut h = DefaultHasher::new();
@@ -81,7 +82,7 @@ impl CacheDB {
             .query_one(
                 //language=sqlite
                 "
-		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, whitelisted
+		SELECT path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, subtitle_languages, whitelisted
 		FROM media
 		WHERE path = ?1
 	",
@@ -101,8 +102,10 @@ impl CacheDB {
                         codec: Codec::from_str(row.get_ref(6)?.as_str()?),
                         last_checked: OffsetDateTime::from_unix_timestamp(row.get(7)?).unwrap(),
                         mtime: row.get(8)?,
-                        languages: row.get::<_, String>(9)?.split(' ').map(str::to_owned).collect(),
-                        whitelisted: row.get(10)?,
+                        // filter guards against "" splitting into one empty-string language
+                        languages: row.get::<_, String>(9)?.split(' ').filter(|s| !s.is_empty()).map(str::to_owned).collect(),
+                        subtitle_languages: row.get::<_, String>(10)?.split(' ').filter(|s| !s.is_empty()).map(str::to_owned).collect(),
+                        whitelisted: row.get(11)?,
                     })
                 },
             )
@@ -119,8 +122,8 @@ impl CacheDB {
             //language=sqlite
             "\
 	INSERT OR REPLACE INTO media
-	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, whitelisted)
-	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+	(path, duration, size, bitrate, height, width, codec, last_checked, mtime, languages, subtitle_languages, whitelisted)
+	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 	",
             (
                 p.as_ref()
@@ -136,6 +139,7 @@ impl CacheDB {
                 media_info.last_checked.unix_timestamp(),
                 media_info.mtime,
                 media_info.languages.join(" "),
+                media_info.subtitle_languages.join(" "),
                 media_info.whitelisted,
             ),
         )?;
