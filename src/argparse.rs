@@ -12,7 +12,9 @@ pub struct Args {
     pub db_path: Option<String>,
 
     #[argh(option, short = 'j', default = "1")]
-    /// number of parallel mediainfo probes
+    /// number of parallel mediainfo probe workers.
+    /// On local HDDs with empty cache 1 worker is probably faster.
+    /// Over a network share or on an SSD more workers are probably faster.
     pub jobs: usize,
 
     #[argh(switch)]
