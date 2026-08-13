@@ -43,28 +43,29 @@ struct Track {
 }
 
 impl Track {
-    fn to_lang_track(&self) -> Option<LangTrack> {
-        Some(LangTrack {
-            language: self.language.clone()?,
+    /// Untagged tracks become "und" rather than disappearing from the MediaInfo
+    /// entirely, so the report can warn about them
+    fn to_lang_track(&self) -> LangTrack {
+        LangTrack {
+            language: match self.language.as_deref().map(str::trim) {
+                Some(l) if !l.is_empty() => l.to_owned(),
+                _ => "und".to_owned(),
+            },
             size: self
                 .stream_size
                 .as_deref()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
-        })
+        }
     }
 }
 
-/// Runs mediainfo on the file; no cache involved
-pub fn probe_mediainfo(
-    p: impl AsRef<Path> + std::fmt::Debug,
-    metadata: &Metadata,
-) -> JwatchResult<MediaInfo> {
+fn run_mediainfo(p: &Path) -> JwatchResult<Vec<Track>> {
     let cmd = Command::new("mediainfo")
         .arg("--Language=raw")
         .arg("--Full")
         .arg("--Output=JSON")
-        .arg(p.as_ref())
+        .arg(p)
         .output()?;
 
     if !cmd.status.success() {
@@ -80,7 +81,42 @@ pub fn probe_mediainfo(
 
     let json: JsonMediaInfo = serde_json::from_str(&output)
         .map_err(|e| eyre!("Failed to parse mediainfo JSON output: {}", e))?;
-    let tracks = json.media.tracks;
+    Ok(json.media.tracks)
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum TrackKind {
+    Audio,
+    Text,
+    Other,
+}
+
+pub struct ProbedTrack {
+    pub kind: TrackKind,
+    pub language: Option<String>,
+}
+
+/// Tracks in file order with kind and language, e.g. for building ffmpeg stream maps
+pub fn probe_track_layout(p: &Path) -> JwatchResult<Vec<ProbedTrack>> {
+    Ok(run_mediainfo(p)?
+        .into_iter()
+        .map(|t| ProbedTrack {
+            kind: match t.type_.as_str() {
+                "Audio" => TrackKind::Audio,
+                "Text" => TrackKind::Text,
+                _ => TrackKind::Other,
+            },
+            language: t.language,
+        })
+        .collect())
+}
+
+/// Runs mediainfo on the file; no cache involved
+pub fn probe_mediainfo(
+    p: impl AsRef<Path> + std::fmt::Debug,
+    metadata: &Metadata,
+) -> JwatchResult<MediaInfo> {
+    let tracks = run_mediainfo(p.as_ref())?;
 
     let general_track = tracks
         .iter()
@@ -136,12 +172,12 @@ pub fn probe_mediainfo(
         audio_language: tracks
             .iter()
             .filter(|t| t.type_ == "Audio")
-            .filter_map(Track::to_lang_track)
+            .map(Track::to_lang_track)
             .collect::<Vec<_>>(),
         subtitle_languages: tracks
             .iter()
             .filter(|t| t.type_ == "Text")
-            .filter_map(Track::to_lang_track)
+            .map(Track::to_lang_track)
             .collect::<Vec<_>>(),
         whitelisted: false,
     };
